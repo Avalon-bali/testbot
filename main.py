@@ -59,7 +59,7 @@ def telegram_webhook():
 
     try:
         response = openai.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4-turbo",
             messages=messages
         )
         reply = response.choices[0].message.content.strip()

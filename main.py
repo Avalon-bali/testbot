@@ -17,7 +17,9 @@ openai.api_key = OPENAI_API_KEY
 sessions = {}
 lead_progress = {}
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("avalon-424200-6e629f8957b0.json", scope)
+with open("/etc/secrets/google-credentials.json", "r") as f:
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(json.load(f), scope)
+
 gc = gspread.authorize(creds)
 sheet = gc.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 

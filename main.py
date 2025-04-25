@@ -6,12 +6,10 @@ import os
 
 app = Flask(__name__)
 
-# Жёстко заданный токен
 TELEGRAM_TOKEN = "7942085031:AAERWupDOXiDvqA1LE-EWTE8JM9n3Qa0v44"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# Память по user_id
 sessions = {}
 
 def load_documents():

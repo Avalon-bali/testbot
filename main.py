@@ -78,12 +78,26 @@ def telegram_webhook():
 
         elif stage == "name":
             lead["name"] = text
-            lead["stage"] = "time"
-            send_telegram_message(chat_id, "Когда вам удобно созвониться — сегодня, завтра, в будни? И в какое время — утром или после обеда?")
+            if lead["platform"].lower() in ["zoom", "google meet", "meet"]:
+                lead["stage"] = "link_contact"
+                send_telegram_message(chat_id, "Куда вам отправить ссылку на звонок? Можно Telegram username или другое удобное место.")
+            else:
+                lead["stage"] = "datetime"
+                send_telegram_message(chat_id, "Когда вам удобно созвониться — сегодня, завтра или в другой день? И во сколько — в первой половине дня или во второй?")
             return "ok"
 
-        elif stage == "time":
+        elif stage == "link_contact":
+            lead["contact"] = text
+            lead["stage"] = "datetime"
+            send_telegram_message(chat_id, "Спасибо! И когда вам удобно созвониться — сегодня, завтра или в другой день? И во сколько — в первой половине дня или во второй?")
+            return "ok"
+
+        elif stage == "datetime":
             lead["time"] = text
+            # извлекаем проект из текста, если есть
+            for project in ["OM", "TAO", "BUDDHA"]:
+                if project.lower() in text.lower():
+                    lead["project"] = project
             row = [
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 lead.get("name", first_name),
@@ -91,13 +105,14 @@ def telegram_webhook():
                 lead.get("contact", f"Telegram @{username or first_name}"),
                 lead.get("platform", ""),
                 lead.get("time", ""),
-                "—",
+                lead.get("project", "—"),
                 language
             ]
             sheet.append_row(row)
-            send_telegram_message(chat_id, f"Готово! Я передал информацию нашему менеджеру. Он свяжется с вами через {lead.get('platform', 'выбранный канал')} в ближайшее удобное время.")
+            send_telegram_message(chat_id, f"✅ Звонок подтверждён. Менеджер свяжется с вами через {lead.get('platform', 'указанный канал')} в ближайшее удобное время. До встречи!")
             lead_progress.pop(user_id)
             return "ok"
+
 
     if text.strip().lower() in ["/start"]:
         sessions[user_id] = []
@@ -119,10 +134,10 @@ def telegram_webhook():
 
     sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
 
-    if any(word in text.lower() for word in ["звонок", "созвон", "встретиться"]):
-        lead_progress[user_id] = {"stage": "platform"}
-        send_telegram_message(chat_id, "Хорошо! Уточните, пожалуйста: вы предпочитаете Zoom, Google Meet или мессенджеры?")
-        return "ok"
+ if any(word in text.lower() for word in ["звонок", "созвон", "встретиться"]):
+    lead_progress[user_id] = {"stage": "platform"}
+    send_telegram_message(chat_id, "Хорошо! Уточните, пожалуйста: вы предпочитаете Zoom, Google Meet или WhatsApp?")
+    return "ok"
 
     send_telegram_message(chat_id, reply)
     return "ok"

@@ -77,7 +77,11 @@ def telegram_webhook():
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
+    payload = {
+    "chat_id": chat_id,
+    "text": text,
+    "parse_mode": "Markdown"
+}
     r = requests.post(url, json=payload)
     print("📤 Ответ отправлен:", r.status_code, r.text)
 

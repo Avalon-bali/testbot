@@ -1,10 +1,10 @@
-
 from flask import Flask, request
 import openai
 import requests
 import os
 import gspread
 import json
+import random
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -80,7 +80,7 @@ def telegram_webhook():
             lead["name"] = text
             if lead["platform"].lower() in ["zoom", "google meet", "meet"]:
                 lead["stage"] = "link_contact"
-                send_telegram_message(chat_id, "Куда вам отправить ссылку на звонок? Можно Telegram username или другое удобное место.")
+                send_telegram_message(chat_id, "Куда вам отправить ссылку на звонок? Можно Telegram username или другой удобный способ.")
             else:
                 lead["stage"] = "datetime"
                 send_telegram_message(chat_id, "Когда вам удобно созвониться — сегодня, завтра или в другой день? И во сколько — в первой половине дня или во второй?")
@@ -94,7 +94,6 @@ def telegram_webhook():
 
         elif stage == "datetime":
             lead["time"] = text
-            # извлекаем проект из текста, если есть
             for project in ["OM", "TAO", "BUDDHA"]:
                 if project.lower() in text.lower():
                     lead["project"] = project
@@ -113,13 +112,38 @@ def telegram_webhook():
             lead_progress.pop(user_id)
             return "ok"
 
-
+    # Приветствие на старте с учётом языка
     if text.strip().lower() in ["/start"]:
         sessions[user_id] = []
         lead_progress.pop(user_id, None)
-        send_telegram_message(chat_id, "👋 Привет! Я — AI ассистент Avalon. Спросите про OM, BUDDHA, TAO или инвестиции на Бали.")
+
+        greetings_ru = [
+            "👋 Привет! Я — AI ассистент Avalon. Чем могу помочь вам сегодня?",
+            "Здравствуйте! Готов ответить на ваши вопросы по OM, BUDDHA, TAO и инвестициям на Бали.",
+            "Добро пожаловать! Я — AI консультант Avalon. Спросите про проекты или организуем звонок.",
+        ]
+
+        greetings_en = [
+            "👋 Hello! I’m the AI assistant of Avalon. How can I help you today?",
+            "Welcome! I can assist you with any questions about OM, BUDDHA, TAO or investing in Bali.",
+        ]
+
+        greetings_uk = [
+            "👋 Вітаю! Я — AI-асистент Avalon. Чим можу допомогти сьогодні?",
+            "Доброго дня! Готовий відповісти на ваші запитання про проєкти Avalon та інвестиції на Балі.",
+        ]
+
+        if language.startswith("en"):
+            greeting = random.choice(greetings_en)
+        elif language.startswith("uk"):
+            greeting = random.choice(greetings_uk)
+        else:
+            greeting = random.choice(greetings_ru)
+
+        send_telegram_message(chat_id, greeting)
         return "ok"
 
+    # ChatGPT обработка
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}
@@ -134,10 +158,10 @@ def telegram_webhook():
 
     sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
 
- if any(word in text.lower() for word in ["звонок", "созвон", "встретиться"]):
-    lead_progress[user_id] = {"stage": "platform"}
-    send_telegram_message(chat_id, "Хорошо! Уточните, пожалуйста: вы предпочитаете Zoom, Google Meet или WhatsApp?")
-    return "ok"
+    if any(word in text.lower() for word in ["звонок", "созвон", "встретиться"]):
+        lead_progress[user_id] = {"stage": "platform"}
+        send_telegram_message(chat_id, "Хорошо! Уточните, пожалуйста: вы предпочитаете Zoom, Google Meet или WhatsApp?")
+        return "ok"
 
     send_telegram_message(chat_id, reply)
     return "ok"

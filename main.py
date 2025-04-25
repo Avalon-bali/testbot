@@ -6,11 +6,12 @@ import os
 
 app = Flask(__name__)
 
+# Жёстко заданный токен
 TELEGRAM_TOKEN = "7942085031:AAERWupDOXiDvqA1LE-EWTE8JM9n3Qa0v44"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# Память на сессию: user_id -> list of messages
+# Память по user_id
 sessions = {}
 
 def load_documents():
@@ -29,7 +30,7 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
-@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+@app.route("/7942085031:AAERWupDOXiDvqA1LE-EWTE8JM9n3Qa0v44", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
     print("🔔 Входящее сообщение от Telegram:", data)
@@ -44,11 +45,10 @@ def telegram_webhook():
 
     if text.strip() == "/start":
         welcome = "👋 Привет! Я — AI ассистент Avalon.\nСпросите про OM, BUDDHA, TAO или про инвестиции на Бали."
-        sessions[user_id] = []  # очистка истории
+        sessions[user_id] = []
         send_telegram_message(chat_id, welcome)
         return "ok"
 
-    # Подготовка истории
     history = sessions.get(user_id, [])
 
     messages = [
@@ -67,7 +67,6 @@ def telegram_webhook():
         reply = f"Произошла ошибка при обращении к OpenAI:\n\n{e}"
         print("❌ Ошибка GPT:", e)
 
-    # Обновляем память пользователя
     sessions[user_id] = (history + [
         {"role": "user", "content": text},
         {"role": "assistant", "content": reply}
@@ -84,7 +83,7 @@ def send_telegram_message(chat_id, text):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon GPT bot is running with memory."
+    return "Avalon GPT bot is running."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

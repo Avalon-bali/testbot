@@ -1,9 +1,10 @@
-import json
+
 from flask import Flask, request
 import openai
 import requests
 import os
 import gspread
+import json
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -16,9 +17,7 @@ openai.api_key = OPENAI_API_KEY
 sessions = {}
 lead_progress = {}
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-with open("/etc/secrets/google-credentials.json", "r") as f:
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(json.load(f), scope)
-
+creds = ServiceAccountCredentials.from_json_keyfile_name("avalon-424200-6e629f8957b0.json", scope)
 gc = gspread.authorize(creds)
 sheet = gc.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
@@ -54,38 +53,47 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
+    # FSM логика по этапам
     if user_id in lead_progress:
-        stage = lead_progress[user_id]["stage"]
+        lead = lead_progress[user_id]
+        stage = lead["stage"]
+
         if stage == "platform":
-            lead_progress[user_id]["platform"] = text
-            lead_progress[user_id]["stage"] = "contact" if "whatsapp" in text.lower() else "name"
-            ask = "Можете, пожалуйста, указать номер WhatsApp?" if "whatsapp" in text.lower() else "Как к вам можно обращаться?"
-            send_telegram_message(chat_id, ask)
+            lead["platform"] = text
+            if "whatsapp" in text.lower():
+                lead["stage"] = "whatsapp_number"
+                send_telegram_message(chat_id, "Пожалуйста, напишите номер WhatsApp, на который удобно связаться.")
+            else:
+                lead["stage"] = "name"
+                send_telegram_message(chat_id, "Как к вам можно обращаться?")
             return "ok"
+
+        elif stage == "whatsapp_number":
+            lead["contact"] = text
+            lead["stage"] = "name"
+            send_telegram_message(chat_id, "Спасибо! А как к вам можно обращаться?")
+            return "ok"
+
         elif stage == "name":
-            lead_progress[user_id]["name"] = text
-            lead_progress[user_id]["stage"] = "contact"
-            send_telegram_message(chat_id, "Куда вам удобнее получить ссылку — в Telegram или WhatsApp?")
+            lead["name"] = text
+            lead["stage"] = "time"
+            send_telegram_message(chat_id, "Когда вам удобно созвониться — сегодня, завтра, в будни? И в какое время — утром или после обеда?")
             return "ok"
-        elif stage == "contact":
-            lead_progress[user_id]["contact"] = text if text.lower() != "telegram" else f"Telegram @{username or first_name}"
-            lead_progress[user_id]["stage"] = "time"
-            send_telegram_message(chat_id, "Когда вам удобнее — утром или после обеда?")
-            return "ok"
+
         elif stage == "time":
-            lead_progress[user_id]["time"] = text
+            lead["time"] = text
             row = [
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                lead_progress[user_id].get("name", first_name),
+                lead.get("name", first_name),
                 str(user_id),
-                lead_progress[user_id].get("contact", f"Telegram @{username or first_name}"),
-                lead_progress[user_id].get("platform", ""),
-                lead_progress[user_id].get("time", ""),
+                lead.get("contact", f"Telegram @{username or first_name}"),
+                lead.get("platform", ""),
+                lead.get("time", ""),
                 "—",
                 language
             ]
             sheet.append_row(row)
-            send_telegram_message(chat_id, "Спасибо! Я передал информацию нашему менеджеру — он скоро свяжется с вами.")
+            send_telegram_message(chat_id, f"Готово! Я передал информацию нашему менеджеру. Он свяжется с вами через {lead.get('platform', 'выбранный канал')} в ближайшее удобное время.")
             lead_progress.pop(user_id)
             return "ok"
 
@@ -109,9 +117,9 @@ def telegram_webhook():
 
     sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
 
-    if "звонок" in text.lower() or "созвон" in text.lower() or "встретиться" in text.lower():
+    if any(word in text.lower() for word in ["звонок", "созвон", "встретиться"]):
         lead_progress[user_id] = {"stage": "platform"}
-        send_telegram_message(chat_id, "Могу согласовать звонок с нашим менеджером. Удобнее в Zoom, Google Meet или мессенджере?")
+        send_telegram_message(chat_id, "Хорошо! Уточните, пожалуйста: вы предпочитаете Zoom, Google Meet или мессенджеры?")
         return "ok"
 
     send_telegram_message(chat_id, reply)
@@ -124,7 +132,7 @@ def send_telegram_message(chat_id, text):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon GPT бот работает и собирает лиды."
+    return "Avalon GPT работает. FSM и лиды активны."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

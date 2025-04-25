@@ -28,7 +28,7 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
-@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+@app.route("/7942085031:AAERWupDOXiDvqA1LE-EWTE8JM9n3Qa0v44", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
     print("🔔 Входящее сообщение от Telegram:", data)

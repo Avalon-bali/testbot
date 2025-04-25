@@ -154,8 +154,9 @@ def telegram_webhook():
         return "ok"
 
     history = sessions.get(user_id, [])
-    messages = [
-        {"role": "system", "content": f"{system_prompt}
+   messages = [
+    {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}
+] + history[-2:] + [{"role": "user", "content": text}]
 
 {documents_context}"}
     ] + history[-2:] + [{"role": "user", "content": text}]

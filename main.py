@@ -45,7 +45,10 @@ system_prompt = load_system_prompt()
 
 def escape_markdown(text):
     escape_chars = r"_*[]()~`>#+-=|{}.!"
-    return re.sub(f"([{re.escape(escape_chars)}])", r"\", text)
+    text = re.sub(f"([{re.escape(escape_chars)}])", r"\", text)
+    # Экранировать ссылки
+    text = re.sub(r"(https?://[^\s]+)", lambda m: f"[ссылка]({m.group(1)})", text)
+    return text
 
 def get_welcome_text(language):
     lang = (language or "").lower()

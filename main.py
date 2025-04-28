@@ -43,34 +43,25 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
-def escape_markdown(text):
+def format_markdown(text):
+    # Экранирование спецсимволов
     escape_chars = r"_*[]()~`>#+-=|{}.!"
     text = re.sub(f"([{re.escape(escape_chars)}])", r"\", text)
-    # Экранировать ссылки
-    text = re.sub(r"(https?://[^\s]+)", lambda m: f"[ссылка]({m.group(1)})", text)
+
+    # Автоматически делать жирным важные слова
+    text = re.sub(r"(Основные аспекты о нас|Месторасположение|Наши проекты|Доходность|Партнёрство|Подход к строительству|Прозрачность и ответственность)", r"\*\*\*\*", text)
+
+    # Делать списки
+    text = re.sub(r"\n\s*", "\n\- ", text)
+
     return text
 
-def get_welcome_text(language):
-    lang = (language or "").lower()
-    if lang.startswith("ru"):
-        return ("👋 _Добро пожаловать!_\n\n"
-                "**Я — AI ассистент отдела продаж Avalon.**\n\n"
-                "Помогу вам узнать о наших проектах 🏡 **OM / BUDDHA / TAO** и инвестициях на острове мечты 🏝️.\n\n"
-                "Спрашивайте!")
-    if lang.startswith("uk"):
-        return ("👋 _Ласкаво просимо!_\n\n"
-                "**Я — AI асистент відділу продажів Avalon.**\n\n"
-                "Допоможу вам дізнатися про наші проекти 🏡 **OM / BUDDHA / TAO** та інвестиції на острові мрії 🏝️.\n\n"
-                "Питайте що завгодно!")
-    if lang.startswith("id"):
-        return ("👋 _Selamat datang!_\n\n"
-                "**Saya adalah asisten AI dari tim penjualan Avalon.**\n\n"
-                "Saya akan membantu Anda tentang proyek kami 🏡 **OM / BUDDHA / TAO** dan investasi di Bali 🏝️.\n\n"
-                "Silakan tanya apa saja!")
-    return ("👋 _Welcome!_\n\n"
-            "**I am the AI sales assistant of Avalon.**\n\n"
-            "I can help you with our projects 🏡 **OM / BUDDHA / TAO** and investments on the dream island 🏝️.\n\n"
-            "Feel free to ask me anything!")
+def send_telegram_message(chat_id, text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": format_markdown(text), "parse_mode": "MarkdownV2"}
+    response = requests.post(url, json=payload)
+    if response.status_code != 200:
+        print("Ошибка отправки в Telegram:", response.text)
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -94,8 +85,7 @@ def telegram_webhook():
     user_last_seen[user_id] = now
 
     if text.strip() == "/start":
-        welcome_text = get_welcome_text(message.get("from", {}).get("language_code", "en"))
-        send_telegram_message(chat_id, welcome_text)
+        send_telegram_message(chat_id, "👋 Добро пожаловать! Я — AI консультант компании Avalon.")
         return "ok"
 
     history = sessions.get(user_id, [])
@@ -114,13 +104,6 @@ def telegram_webhook():
     sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
     send_telegram_message(chat_id, reply)
     return "ok"
-
-def send_telegram_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": escape_markdown(text), "parse_mode": "MarkdownV2"}
-    response = requests.post(url, json=payload)
-    if response.status_code != 200:
-        print("Ошибка отправки в Telegram:", response.text)
 
 @app.route("/", methods=["GET"])
 def home():

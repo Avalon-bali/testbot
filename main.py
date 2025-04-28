@@ -9,6 +9,7 @@ import json
 import time
 from datetime import datetime
 from google.oauth2.service_account import Credentials
+import re
 
 app = Flask(__name__)
 
@@ -26,7 +27,6 @@ creds = Credentials.from_service_account_file("/etc/secrets/google-credentials.j
 gc = gspread.authorize(creds)
 sheet = gc.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
-# IP-адреса Telegram (глобальный список может меняться, тут базовый пример)
 TELEGRAM_IPS = ["149.154.160.0/20", "91.108.4.0/22"]
 
 def load_documents():
@@ -46,10 +46,62 @@ documents_context = load_documents()
 system_prompt = load_system_prompt()
 
 def escape_markdown(text):
-    escape_chars = "_*[]()~`>#+-=|{}.!"  # символы которые нужно экранировать
-    for ch in escape_chars:
-        text = text.replace(ch, f"\\{ch}")
-    return text
+    escape_chars = r"_*[]()~`>#+-=|{}.!"
+    return re.sub(f"([{re.escape(escape_chars)}])", r"\", text)
+
+def get_welcome_text(language):
+    lang = (language or "").lower()
+    if lang.startswith("ru"):
+        return (
+            "👋 _Добро пожаловать!_
+
+"
+            "**Я — AI ассистент отдела продаж Avalon.**
+
+"
+            "Помогу вам узнать о наших проектах 🏡 **OM / BUDDHA / TAO** и инвестициях на острове мечты 🏝️.
+
+"
+            "Спрашивайте!"
+        )
+    if lang.startswith("uk"):
+        return (
+            "👋 _Ласкаво просимо!_
+
+"
+            "**Я — AI асистент відділу продажів Avalon.**
+
+"
+            "Допоможу вам дізнатися про наші проекти 🏡 **OM / BUDDHA / TAO** та інвестиції на острові мрії 🏝️.
+
+"
+            "Питайте що завгодно!"
+        )
+    if lang.startswith("id"):
+        return (
+            "👋 _Selamat datang!_
+
+"
+            "**Saya adalah asisten AI dari tim penjualan Avalon.**
+
+"
+            "Saya akan membantu Anda tentang proyek kami 🏡 **OM / BUDDHA / TAO** dan investasi di Bali 🏝️.
+
+"
+            "Silakan tanya apa saja!"
+        )
+    return (
+        "👋 _Welcome!_
+
+"
+        "**I am the AI sales assistant of Avalon.**
+
+"
+        "I can help you with our projects 🏡 **OM / BUDDHA / TAO** and investments on the dream island 🏝️.
+
+"
+        "Feel free to ask me anything!"
+    )
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -93,6 +145,11 @@ def telegram_webhook():
         return "rate limit", 429
     last_message_time[user_id] = now
     user_last_seen[user_id] = now
+
+    if text.strip() == "/start":
+        welcome_text = get_welcome_text(language)
+        send_telegram_message(chat_id, welcome_text)
+        return "ok"
 
     history = sessions.get(user_id, [])
     messages = [{"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}] + history[-2:] + [{"role": "user", "content": text}]

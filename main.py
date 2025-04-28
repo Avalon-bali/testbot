@@ -69,51 +69,12 @@ def get_welcome_text(language):
             "I can help you with our projects 🏡 **OM / BUDDHA / TAO** and investments on the dream island 🏝️.\n\n"
             "Feel free to ask me anything!")
 
-def find_logo_or_random():
-    candidates = ["/mnt/disk/docs/AVALON", "docs/AVALON"]
-    for folder in candidates:
-        if os.path.exists(folder):
-            files = []
-            logos = []
-            for f in os.listdir(folder):
-                if f.lower().endswith((".jpg", ".jpeg", ".png")):
-                    files.append(f)
-                    if "logo" in f.lower():
-                        logos.append(f)
-            if logos:
-                return os.path.join(folder, random.choice(logos))
-            if files:
-                return os.path.join(folder, random.choice(files))
-    return None
-
-def send_telegram_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": escape_markdown(text), "parse_mode": "MarkdownV2"}
-    response = requests.post(url, json=payload)
-    if response.status_code != 200:
-        print("Ошибка отправки в Telegram:", response.text)
-
-def send_telegram_local_photo(chat_id, photo_path, caption=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    with open(photo_path, "rb") as photo_file:
-        files = {"photo": photo_file}
-        data = {"chat_id": chat_id}
-        if caption:
-            data["caption"] = escape_markdown(caption)
-            data["parse_mode"] = "MarkdownV2"
-        response = requests.post(url, data=data, files=files)
-    if response.status_code != 200:
-        print("Ошибка отправки фото:", response.text)
-
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
     message = data.get("message", {})
     chat_id = message.get("chat", {}).get("id")
     user_id = message.get("from", {}).get("id")
-    username = message.get("from", {}).get("username", "")
-    language = message.get("from", {}).get("language_code", "en")
-    first_name = message.get("from", {}).get("first_name", "")
     text = message.get("text", "")
 
     if not chat_id:
@@ -130,13 +91,8 @@ def telegram_webhook():
     user_last_seen[user_id] = now
 
     if text.strip() == "/start":
-        welcome_text = get_welcome_text(language)
+        welcome_text = get_welcome_text(message.get("from", {}).get("language_code", "en"))
         send_telegram_message(chat_id, welcome_text)
-
-        logo_or_random = find_logo_or_random()
-        if logo_or_random:
-            send_telegram_local_photo(chat_id, logo_or_random, caption="Avalon — инвестиции на Бали 🌴")
-
         return "ok"
 
     history = sessions.get(user_id, [])
@@ -153,27 +109,32 @@ def telegram_webhook():
         reply = "Произошла техническая ошибка\. Пожалуйста, попробуйте позже\."
 
     sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
-
     send_telegram_message(chat_id, reply)
-    cleanup_inactive_users()
     return "ok"
 
-def cleanup_inactive_users():
-    now = time.time()
-    twenty_days = 20 * 24 * 60 * 60
-    to_delete = [user_id for user_id, last_seen in user_last_seen.items() if now - last_seen > twenty_days]
-    for user_id in to_delete:
-        sessions.pop(user_id, None)
-        last_message_time.pop(user_id, None)
-        user_last_seen.pop(user_id, None)
-        lead_progress.pop(user_id, None)
-    if to_delete:
-        print(f"Очищено неактивных пользователей: {len(to_delete)}")
+def send_telegram_message(chat_id, text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": escape_markdown(text), "parse_mode": "MarkdownV2"}
+    response = requests.post(url, json=payload)
+    if response.status_code != 200:
+        print("Ошибка отправки в Telegram:", response.text)
 
 @app.route("/", methods=["GET"])
 def home():
     return "Avalon GPT работает."
 
 if __name__ == "__main__":
+    webhook_url = f"https://testbot-1e8k.onrender.com/{TELEGRAM_TOKEN}"
+    set_webhook_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}"
+
+    try:
+        response = requests.get(set_webhook_url)
+        if response.status_code == 200:
+            print("✅ Webhook установлен автоматически.")
+        else:
+            print(f"❌ Ошибка установки Webhook: {response.text}")
+    except Exception as e:
+        print(f"❌ Ошибка при установке Webhook: {e}")
+
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

@@ -43,25 +43,36 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
-def format_markdown(text):
-    # Экранирование спецсимволов
+def find_logo_or_random():
+    folder = "docs/AVALON"
+    if os.path.exists(folder):
+        files = [f for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        if files:
+            return os.path.join(folder, random.choice(files))
+    return None
+
+def escape_markdown(text):
     escape_chars = r"_*[]()~`>#+-=|{}.!"
-    text = re.sub(f"([{re.escape(escape_chars)}])", r"\", text)
-
-    # Автоматически делать жирным важные слова
-    text = re.sub(r"(Основные аспекты о нас|Месторасположение|Наши проекты|Доходность|Партнёрство|Подход к строительству|Прозрачность и ответственность)", r"\*\*\*\*", text)
-
-    # Делать списки
-    text = re.sub(r"\n\s*", "\n\- ", text)
-
-    return text
+    return re.sub(f"([{re.escape(escape_chars)}])", r"\", text)
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": format_markdown(text), "parse_mode": "MarkdownV2"}
+    payload = {"chat_id": chat_id, "text": escape_markdown(text), "parse_mode": "MarkdownV2"}
     response = requests.post(url, json=payload)
     if response.status_code != 200:
         print("Ошибка отправки в Telegram:", response.text)
+
+def send_telegram_local_photo(chat_id, photo_path, caption=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    with open(photo_path, "rb") as photo_file:
+        files = {"photo": photo_file}
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = escape_markdown(caption)
+            data["parse_mode"] = "MarkdownV2"
+        response = requests.post(url, data=data, files=files)
+    if response.status_code != 200:
+        print("Ошибка отправки фото:", response.text)
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -84,10 +95,6 @@ def telegram_webhook():
     last_message_time[user_id] = now
     user_last_seen[user_id] = now
 
-    if text.strip() == "/start":
-        send_telegram_message(chat_id, "👋 Добро пожаловать! Я — AI консультант компании Avalon.")
-        return "ok"
-
     history = sessions.get(user_id, [])
     messages = [{"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}] + history[-2:] + [{"role": "user", "content": text}]
 
@@ -103,6 +110,14 @@ def telegram_webhook():
 
     sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
     send_telegram_message(chat_id, reply)
+
+    # если в тексте есть слова-триггеры, отправляем фото
+    keywords = ["авалон", "avalon", "om", "buddha", "tao"]
+    if any(word in text.lower() for word in keywords):
+        logo_or_random = find_logo_or_random()
+        if logo_or_random:
+            send_telegram_local_photo(chat_id, logo_or_random, caption="Avalon — инвестиции на Бали 🌴")
+
     return "ok"
 
 @app.route("/", methods=["GET"])

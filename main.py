@@ -3,12 +3,7 @@ from flask import Flask, request
 import openai
 import requests
 import os
-import random
-import gspread
-import json
 import time
-from datetime import datetime
-from google.oauth2.service_account import Credentials
 import re
 
 app = Flask(__name__)
@@ -19,50 +14,35 @@ client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 sessions = {}
 last_message_time = {}
-user_last_seen = {}
-lead_progress = {}
 
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_file("/etc/secrets/google-credentials.json", scopes=scope)
-gc = gspread.authorize(creds)
-sheet = gc.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
+def escape_markdown(text):
+    escape_chars = r"_*[]()~`>#+-=|{}.!"
+    text = re.sub(f"([{re.escape(escape_chars)}])", r"\\\1", text)
+    return text
 
-def load_documents():
-    folder = "docs"
-    context_parts = []
-    for filename in os.listdir(folder):
-        if filename.endswith(".txt") and filename != "system_prompt.txt":
-            with open(os.path.join(folder, filename), "r", encoding="utf-8") as f:
-                context_parts.append(f.read()[:3000])
-    return "\n\n".join(context_parts)
+def format_answer(text):
+    keywords = ["Высокая доходность", "Три уникальных проекта", "Партнёрство с Ribas Hotels Group", "Современные стандарты", "Прозрачность и ответственность"]
+    for word in keywords:
+        text = text.replace(word, f"**{word}**")
+    text = escape_markdown(text)
+    return text
 
-def load_system_prompt():
-    with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
-        return f.read()
-
-documents_context = load_documents()
-system_prompt = load_system_prompt()
-
-def find_logo_or_random():
+def find_logo():
     folder = "docs/AVALON"
     if os.path.exists(folder):
         files = [f for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
         if files:
-            return os.path.join(folder, random.choice(files))
+            return os.path.join(folder, files[0])
     return None
-
-def escape_markdown(text):
-    escape_chars = r"_*[]()~`>#+-=|{}.!"
-    return re.sub(f"([{re.escape(escape_chars)}])", r"\", text)
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": escape_markdown(text), "parse_mode": "MarkdownV2"}
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "MarkdownV2"}
     response = requests.post(url, json=payload)
     if response.status_code != 200:
-        print("Ошибка отправки в Telegram:", response.text)
+        print("Ошибка отправки текста:", response.text)
 
-def send_telegram_local_photo(chat_id, photo_path, caption=None):
+def send_telegram_photo(chat_id, photo_path, caption=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     with open(photo_path, "rb") as photo_file:
         files = {"photo": photo_file}
@@ -85,38 +65,41 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    if text and len(text) > 1000:
-        text = text[:1000]
-
     now = time.time()
     last_time = last_message_time.get(user_id, 0)
-    if now - last_time < 2:
+    if now - last_time < 1:
         return "rate limit", 429
     last_message_time[user_id] = now
-    user_last_seen[user_id] = now
 
-    history = sessions.get(user_id, [])
-    messages = [{"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}] + history[-2:] + [{"role": "user", "content": text}]
+    if text.strip() == "/start":
+        send_telegram_message(chat_id, "👋 _Добро пожаловать!_\n\n**Я — AI ассистент компании Avalon.**")
+        logo = find_logo()
+        if logo:
+            send_telegram_photo(chat_id, logo, caption="Avalon — инвестиции на Бали 🌴")
+        return "ok"
+
+    sessions.setdefault(user_id, [])
+    history = sessions[user_id][-2:] + [{"role": "user", "content": text}]
 
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=messages
+            messages=[{"role": "system", "content": "Ты представляешь компанию Avalon. Пиши строго и по делу."}] + history
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Ошибка OpenAI: {e}")
-        reply = "Произошла техническая ошибка\. Пожалуйста, попробуйте позже\."
+        reply = "Произошла техническая ошибка\. Попробуйте позже\."
 
-    sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
-    send_telegram_message(chat_id, reply)
+    sessions[user_id] = (sessions[user_id] + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
+    formatted = format_answer(reply)
+    send_telegram_message(chat_id, formatted)
 
-    # если в тексте есть слова-триггеры, отправляем фото
-    keywords = ["авалон", "avalon", "om", "buddha", "tao"]
-    if any(word in text.lower() for word in keywords):
-        logo_or_random = find_logo_or_random()
-        if logo_or_random:
-            send_telegram_local_photo(chat_id, logo_or_random, caption="Avalon — инвестиции на Бали 🌴")
+    keywords = ["авалон", "avalon", "ом", "budda", "buddha", "tao"]
+    if any(k in text.lower() for k in keywords):
+        logo = find_logo()
+        if logo:
+            send_telegram_photo(chat_id, logo, caption="Avalon — инвестиции на Бали 🌴")
 
     return "ok"
 

@@ -52,56 +52,24 @@ def escape_markdown(text):
 def get_welcome_text(language):
     lang = (language or "").lower()
     if lang.startswith("ru"):
-        return (
-            "👋 _Добро пожаловать!_
-
-"
-            "**Я — AI ассистент отдела продаж Avalon.**
-
-"
-            "Помогу вам узнать о наших проектах 🏡 **OM / BUDDHA / TAO** и инвестициях на острове мечты 🏝️.
-
-"
-            "Спрашивайте!"
-        )
+        return ("👋 _Добро пожаловать!_\n\n"
+                "**Я — AI ассистент отдела продаж Avalon.**\n\n"
+                "Помогу вам узнать о наших проектах 🏡 **OM / BUDDHA / TAO** и инвестициях на острове мечты 🏝️.\n\n"
+                "Спрашивайте!")
     if lang.startswith("uk"):
-        return (
-            "👋 _Ласкаво просимо!_
-
-"
-            "**Я — AI асистент відділу продажів Avalon.**
-
-"
-            "Допоможу вам дізнатися про наші проекти 🏡 **OM / BUDDHA / TAO** та інвестиції на острові мрії 🏝️.
-
-"
-            "Питайте що завгодно!"
-        )
+        return ("👋 _Ласкаво просимо!_\n\n"
+                "**Я — AI асистент відділу продажів Avalon.**\n\n"
+                "Допоможу вам дізнатися про наші проекти 🏡 **OM / BUDDHA / TAO** та інвестиції на острові мрії 🏝️.\n\n"
+                "Питайте що завгодно!")
     if lang.startswith("id"):
-        return (
-            "👋 _Selamat datang!_
-
-"
-            "**Saya adalah asisten AI dari tim penjualan Avalon.**
-
-"
-            "Saya akan membantu Anda tentang proyek kami 🏡 **OM / BUDDHA / TAO** dan investasi di Bali 🏝️.
-
-"
-            "Silakan tanya apa saja!"
-        )
-    return (
-        "👋 _Welcome!_
-
-"
-        "**I am the AI sales assistant of Avalon.**
-
-"
-        "I can help you with our projects 🏡 **OM / BUDDHA / TAO** and investments on the dream island 🏝️.
-
-"
-        "Feel free to ask me anything!"
-    )
+        return ("👋 _Selamat datang!_\n\n"
+                "**Saya adalah asisten AI dari tim penjualan Avalon.**\n\n"
+                "Saya akan membantu Anda tentang proyek kami 🏡 **OM / BUDDHA / TAO** dan investasi di Bali 🏝️.\n\n"
+                "Silakan tanya apa saja!")
+    return ("👋 _Welcome!_\n\n"
+            "**I am the AI sales assistant of Avalon.**\n\n"
+            "I can help you with our projects 🏡 **OM / BUDDHA / TAO** and investments on the dream island 🏝️.\n\n"
+            "Feel free to ask me anything!")
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"

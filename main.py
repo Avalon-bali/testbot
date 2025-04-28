@@ -102,7 +102,7 @@ def send_telegram_local_photo(chat_id, photo_path, caption=None):
 def is_meaningful_reply(expected_question, user_reply):
     check_prompt = f"Ты AI-помощник. Ты задал клиенту вопрос: '{expected_question}'\n\nКлиент ответил: '{user_reply}'\n\nЭто ответ на твой вопрос? Ответь 'да' или 'нет'."
     try:
-        check_response = openai.ChatCompletion.create(  # исправлено здесь
+        check_response = openai.chat.completions.create(  # исправлено здесь
             model="gpt-4o",
             messages=[{"role": "user", "content": check_prompt}]
         )

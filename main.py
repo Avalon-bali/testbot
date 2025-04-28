@@ -15,16 +15,27 @@ client = openai.OpenAI(api_key=OPENAI_API_KEY)
 sessions = {}
 last_message_time = {}
 
-def escape_markdown(text):
+def deep_escape_markdown(text):
+    # Экранировать символы для MarkdownV2
     escape_chars = r"_*[]()~`>#+-=|{}.!"
-    text = re.sub(f"([{re.escape(escape_chars)}])", r"\\\1", text)
+    text = re.sub(r"([{0}])".format(re.escape(escape_chars)), r"\\\1", text)
     return text
 
-def format_answer(text):
-    keywords = ["Высокая доходность", "Три уникальных проекта", "Партнёрство с Ribas Hotels Group", "Современные стандарты", "Прозрачность и ответственность"]
-    for word in keywords:
+def format_markdown(text):
+    # Вставить жирные участки перед экранированием
+    important_words = [
+        "Высокая доходность", 
+        "Три уникальных проекта", 
+        "Партнёрство с Ribas Hotels Group", 
+        "Современные стандарты", 
+        "Прозрачность и ответственность"
+    ]
+    for word in important_words:
         text = text.replace(word, f"**{word}**")
-    text = escape_markdown(text)
+    # Потом экранировать весь текст
+    text = deep_escape_markdown(text)
+    # И ещё раз экранировать двойные звездочки правильно
+    text = text.replace("**", "\\*\\*")
     return text
 
 def find_logo():
@@ -48,7 +59,7 @@ def send_telegram_photo(chat_id, photo_path, caption=None):
         files = {"photo": photo_file}
         data = {"chat_id": chat_id}
         if caption:
-            data["caption"] = escape_markdown(caption)
+            data["caption"] = deep_escape_markdown(caption)
             data["parse_mode"] = "MarkdownV2"
         response = requests.post(url, data=data, files=files)
     if response.status_code != 200:
@@ -71,20 +82,13 @@ def telegram_webhook():
         return "rate limit", 429
     last_message_time[user_id] = now
 
-    if text.strip() == "/start":
-        send_telegram_message(chat_id, "👋 _Добро пожаловать!_\n\n**Я — AI ассистент компании Avalon.**")
-        logo = find_logo()
-        if logo:
-            send_telegram_photo(chat_id, logo, caption="Avalon — инвестиции на Бали 🌴")
-        return "ok"
-
     sessions.setdefault(user_id, [])
     history = sessions[user_id][-2:] + [{"role": "user", "content": text}]
 
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "system", "content": "Ты представляешь компанию Avalon. Пиши строго и по делу."}] + history
+            messages=[{"role": "system", "content": "Ты AI-ассистент компании Avalon. Отвечай дружелюбно, подробно, структурировано."}] + history
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
@@ -92,7 +96,7 @@ def telegram_webhook():
         reply = "Произошла техническая ошибка\. Попробуйте позже\."
 
     sessions[user_id] = (sessions[user_id] + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
-    formatted = format_answer(reply)
+    formatted = format_markdown(reply)
     send_telegram_message(chat_id, formatted)
 
     keywords = ["авалон", "avalon", "ом", "budda", "buddha", "tao"]

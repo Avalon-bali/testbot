@@ -1,5 +1,5 @@
 
-from flask import Flask, request, abort
+from flask import Flask, request
 import openai
 import requests
 import os
@@ -26,8 +26,6 @@ scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 creds = Credentials.from_service_account_file("/etc/secrets/google-credentials.json", scopes=scope)
 gc = gspread.authorize(creds)
 sheet = gc.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
-
-TELEGRAM_IPS = ["149.154.160.0/20", "91.108.4.0/22"]
 
 def load_documents():
     folder = "docs"
@@ -71,6 +69,23 @@ def get_welcome_text(language):
             "I can help you with our projects 🏡 **OM / BUDDHA / TAO** and investments on the dream island 🏝️.\n\n"
             "Feel free to ask me anything!")
 
+def find_logo_or_random():
+    candidates = ["/mnt/disk/docs/AVALON", "docs/AVALON"]
+    for folder in candidates:
+        if os.path.exists(folder):
+            files = []
+            logos = []
+            for f in os.listdir(folder):
+                if f.lower().endswith((".jpg", ".jpeg", ".png")):
+                    files.append(f)
+                    if "logo" in f.lower():
+                        logos.append(f)
+            if logos:
+                return os.path.join(folder, random.choice(logos))
+            if files:
+                return os.path.join(folder, random.choice(files))
+    return None
+
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": escape_markdown(text), "parse_mode": "MarkdownV2"}
@@ -78,20 +93,20 @@ def send_telegram_message(chat_id, text):
     if response.status_code != 200:
         print("Ошибка отправки в Telegram:", response.text)
 
-def ip_in_telegram_ranges(ip):
-    import ipaddress
-    for cidr in TELEGRAM_IPS:
-        if ipaddress.ip_address(ip) in ipaddress.ip_network(cidr):
-            return True
-    return False
+def send_telegram_local_photo(chat_id, photo_path, caption=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    with open(photo_path, "rb") as photo_file:
+        files = {"photo": photo_file}
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = escape_markdown(caption)
+            data["parse_mode"] = "MarkdownV2"
+        response = requests.post(url, data=data, files=files)
+    if response.status_code != 200:
+        print("Ошибка отправки фото:", response.text)
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
-    ip = request.remote_addr
-    if not ip_in_telegram_ranges(ip):
-        print(f"Отклонено соединение с IP: {ip}")
-        abort(403)
-
     data = request.get_json()
     message = data.get("message", {})
     chat_id = message.get("chat", {}).get("id")
@@ -117,6 +132,11 @@ def telegram_webhook():
     if text.strip() == "/start":
         welcome_text = get_welcome_text(language)
         send_telegram_message(chat_id, welcome_text)
+
+        logo_or_random = find_logo_or_random()
+        if logo_or_random:
+            send_telegram_local_photo(chat_id, logo_or_random, caption="Avalon — инвестиции на Бали 🌴")
+
         return "ok"
 
     history = sessions.get(user_id, [])

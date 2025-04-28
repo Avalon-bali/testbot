@@ -11,7 +11,7 @@ from google.oauth2.service_account import Credentials
 
 app = Flask(__name__)
 
-TELEGRAM_TOKEN = "7942085031:AAERWupDOXiDvqA1LE-EWTE8JM9n3Qa0v44"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
@@ -58,6 +58,9 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
+    if text and len(text) > 1000:
+        text = text[:1000]
+
     history = sessions.get(user_id, [])
     messages = [{"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}] + history[-2:] + [{"role": "user", "content": text}]
 
@@ -68,7 +71,7 @@ def telegram_webhook():
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
-        reply = f"Произошла ошибка при обращении к OpenAI:\n\n{e}"
+        reply = "Произошла техническая ошибка. Пожалуйста, попробуйте позже."
 
     sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
 

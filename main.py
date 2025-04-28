@@ -6,6 +6,7 @@ import os
 import random
 import gspread
 import json
+import time
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 
@@ -16,6 +17,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 sessions = {}
+last_message_time = {}
 lead_progress = {}
 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -39,9 +41,15 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
+def escape_markdown(text):
+    escape_chars = "_*[]()~`>#+-=|{}.!"  # символы которые нужно экранировать
+    for ch in escape_chars:
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    payload = {"chat_id": chat_id, "text": escape_markdown(text), "parse_mode": "MarkdownV2"}
     requests.post(url, json=payload)
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
@@ -61,6 +69,13 @@ def telegram_webhook():
     if text and len(text) > 1000:
         text = text[:1000]
 
+    # Антифлуд: проверяем интервал
+    now = time.time()
+    last_time = last_message_time.get(user_id, 0)
+    if now - last_time < 2:  # меньше 2 секунд
+        return "rate limit", 429
+    last_message_time[user_id] = now
+
     history = sessions.get(user_id, [])
     messages = [{"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}] + history[-2:] + [{"role": "user", "content": text}]
 
@@ -71,7 +86,7 @@ def telegram_webhook():
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
-        reply = "Произошла техническая ошибка. Пожалуйста, попробуйте позже."
+        reply = "Произошла техническая ошибка\. Пожалуйста, попробуйте позже\."
 
     sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-6:]
 

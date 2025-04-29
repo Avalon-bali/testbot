@@ -3,6 +3,7 @@ import openai
 import requests
 import os
 import time
+import re
 
 app = Flask(__name__)
 
@@ -10,9 +11,29 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# Память на сессию: user_id -> list of messages
 sessions = {}
 last_message_time = {}
+
+# Экранирование для MarkdownV2
+def escape_markdown_v2(text):
+    escape_chars = r"_*[]()~`>#+-=|{}.!<>"
+    return re.sub(r"([{}])".format(re.escape(escape_chars)), r"\\\1", text)
+
+# Жирное выделение важных частей
+def bold_important_parts(text):
+    important_phrases = [
+        "организовать консультацию",
+        "согласовать личный звонок",
+        "индивидуальная консультация",
+        "созвониться для обсуждения деталей",
+        "обсудить ваши вопросы на звонке",
+        "помочь выбрать проект на созвоне"
+    ]
+    for phrase in important_phrases:
+        text = text.replace(phrase, f"**{phrase}**")
+    text = escape_markdown_v2(text)
+    text = text.replace("**", "\\*\\*")
+    return text
 
 # Загрузка базы знаний
 def load_documents():
@@ -31,13 +52,14 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
-# Отправка текста в Telegram
+# Отправка сообщения в Telegram
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    formatted_text = bold_important_parts(text)
     payload = {
         "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown"  # обычный Markdown, без заморочек
+        "text": formatted_text,
+        "parse_mode": "MarkdownV2"
     }
     response = requests.post(url, json=payload)
     if response.status_code != 200:
@@ -50,13 +72,14 @@ def send_telegram_photo(chat_id, photo_path, caption=None):
         files = {"photo": photo_file}
         data = {"chat_id": chat_id}
         if caption:
+            caption = escape_markdown_v2(caption)
             data["caption"] = caption
-            data["parse_mode"] = "Markdown"
+            data["parse_mode"] = "MarkdownV2"
         response = requests.post(url, data=data, files=files)
     if response.status_code != 200:
         print("Ошибка отправки фото:", response.text)
 
-# Найти лого для отправки
+# Поиск логотипа
 def find_logo():
     folder = "docs/AVALON"
     if os.path.exists(folder):
@@ -65,7 +88,7 @@ def find_logo():
             return os.path.join(folder, files[0])
     return None
 
-# Основной маршрут для Telegram Webhook
+# Webhook для Telegram
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
@@ -77,16 +100,14 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    # Анти-флуд (не чаще 1 сообщения в секунду)
     now = time.time()
     last_time = last_message_time.get(user_id, 0)
     if now - last_time < 1:
         return "rate limit", 429
     last_message_time[user_id] = now
 
-    # Подготовка истории
     sessions.setdefault(user_id, [])
-    history = sessions[user_id][-6:]  # последние 6 сообщений
+    history = sessions[user_id][-6:]
 
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}
@@ -104,16 +125,13 @@ def telegram_webhook():
         print(f"Ошибка OpenAI: {e}")
         reply = "Произошла техническая ошибка. Попробуйте позже."
 
-    # Сохраняем в историю
     sessions[user_id] = (history + [
         {"role": "user", "content": text},
         {"role": "assistant", "content": reply}
-    ])[-10:]  # до 10 сообщений
+    ])[-10:]
 
-    # Отправка текста
     send_telegram_message(chat_id, reply)
 
-    # При упоминании ключевых слов — отправка лого
     keywords = ["авалон", "avalon", "ом", "buddha", "budda", "tao"]
     if any(k in text.lower() for k in keywords):
         logo = find_logo()

@@ -13,6 +13,7 @@ openai.api_key = OPENAI_API_KEY
 sessions = {}
 last_message_time = {}
 
+# 📚 Загрузка файлов
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -29,18 +30,20 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
+# 📩 Отправка сообщения в Telegram
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown",  # вернулся на простой Markdown
+        "parse_mode": "Markdown",
         "disable_web_page_preview": False
     }
     response = requests.post(url, json=payload)
     if response.status_code != 200:
         print("Ошибка отправки текста:", response.text)
 
+# 🖼 Отправка фото
 def send_telegram_photo(chat_id, photo_path, caption=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     with open(photo_path, "rb") as photo_file:
@@ -53,6 +56,7 @@ def send_telegram_photo(chat_id, photo_path, caption=None):
     if response.status_code != 200:
         print("Ошибка отправки фото:", response.text)
 
+# 🔍 Поиск логотипа
 def find_logo():
     folder = "docs/AVALON"
     if os.path.exists(folder):
@@ -61,6 +65,7 @@ def find_logo():
             return os.path.join(folder, files[0])
     return None
 
+# 🚀 Обработка Webhook от Telegram
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
@@ -71,6 +76,32 @@ def telegram_webhook():
 
     if not chat_id:
         return "no chat_id", 400
+
+    # 👉 Команда для добавления в system prompt
+    if text.startswith("/addprompt "):
+        addition = text[len("/addprompt "):].strip()
+        try:
+            with open("docs/system_prompt.txt", "a", encoding="utf-8") as f:
+                f.write("\n" + addition)
+            global system_prompt
+            system_prompt = load_system_prompt()
+            send_telegram_message(chat_id, "✅ Новый текст добавлен в system prompt.")
+        except Exception as e:
+            send_telegram_message(chat_id, f"❌ Ошибка при добавлении prompt: {e}")
+        return "ok"
+
+    # 👉 Команда для просмотра текущего system prompt
+    if text.strip() == "/prompt":
+        try:
+            with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
+                current_prompt = f.read()
+            if len(current_prompt) > 4000:
+                send_telegram_message(chat_id, "⚠️ Промпт слишком длинный для отправки целиком.")
+            else:
+                send_telegram_message(chat_id, f"📝 Текущий prompt:\n\n{current_prompt}")
+        except Exception as e:
+            send_telegram_message(chat_id, f"❌ Ошибка при чтении prompt: {e}")
+        return "ok"
 
     now = time.time()
     last_time = last_message_time.get(user_id, 0)
@@ -112,6 +143,7 @@ def telegram_webhook():
 
     return "ok"
 
+# 🛠 Проверка сервера
 @app.route("/", methods=["GET"])
 def home():
     return "Avalon GPT работает стабильно."

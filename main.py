@@ -6,6 +6,7 @@ import time
 import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
+import random
 
 app = Flask(__name__)
 
@@ -13,19 +14,19 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
+ADMIN_ID = 5275555034  # твой Telegram ID
 sessions = {}
 last_message_time = {}
+fsm_state = {}
+lead_data = {}
 
-# Google Sheets авторизация
+# Авторизация в Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name("/etc/secrets/google-credentials.json", scope)
 gsheet = gspread.authorize(creds)
 sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
-fsm_state = {}
-lead_data = {}
-
-# Загрузка базы
+# Загрузка базы знаний
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -70,6 +71,31 @@ def find_logo():
             return os.path.join(folder, files[0])
     return None
 
+# Разные приветствия в зависимости от языка устройства
+def get_greeting(language_code):
+    russian = ["ru", "uk", "be"]
+    indonesian = ["id", "ms", "jv"]
+    
+    if language_code in russian:
+        greetings = [
+            "Здравствуйте! Я AI Assistant компании Avalon, рад помочь вам с вопросами о проектах на Бали.",
+            "Добрый день! Я AI Assistant Avalon. Чем могу быть полезен?",
+            "Приветствую вас! Готов помочь вам разобраться в проектах Avalon."
+        ]
+    elif language_code in indonesian:
+        greetings = [
+            "Halo! Saya AI Assistant Avalon. Bagaimana saya bisa membantu Anda?",
+            "Selamat datang! Saya AI Assistant Avalon, siap membantu Anda.",
+            "Hai! Avalon Assistant siap membantu Anda."
+        ]
+    else:
+        greetings = [
+            "Hello! I am Avalon AI Assistant. How can I assist you today?",
+            "Welcome! I'm Avalon AI Assistant, happy to help you.",
+            "Hi! Avalon Assistant here. Feel free to ask any questions!"
+        ]
+    return random.choice(greetings)
+
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
@@ -77,36 +103,16 @@ def telegram_webhook():
     chat_id = message.get("chat", {}).get("id")
     user_id = message.get("from", {}).get("id")
     text = message.get("text", "")
+    language_code = message.get("from", {}).get("language_code", "en")
 
     if not chat_id:
         return "no chat_id", 400
 
-    # Команды prompt
-    if text.startswith("/addprompt "):
-        addition = text[len("/addprompt "):].strip()
-        try:
-            with open("docs/system_prompt.txt", "a", encoding="utf-8") as f:
-                f.write("\n" + addition)
-            global system_prompt
-            system_prompt = load_system_prompt()
-            send_telegram_message(chat_id, "✅ Новый текст добавлен в system prompt.")
-        except Exception as e:
-            send_telegram_message(chat_id, f"❌ Ошибка при добавлении prompt: {e}")
-        return "ok"
-
-    if text.strip() == "/prompt":
-        try:
-            with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
-                current_prompt = f.read()
-            if len(current_prompt) > 4000:
-                send_telegram_message(chat_id, "⚠️ Промпт слишком длинный.")
-            else:
-                send_telegram_message(chat_id, f"📝 Текущий prompt:\n\n{current_prompt}")
-        except Exception as e:
-            send_telegram_message(chat_id, f"❌ Ошибка при чтении prompt: {e}")
-        return "ok"
-
+    # Команды для админа
     if text.strip() == "/leads":
+        if user_id != ADMIN_ID:
+            send_telegram_message(chat_id, "⛔ Эта команда доступна только администратору.")
+            return "ok"
         try:
             rows = sheet.get_all_values()
             last = rows[-3:] if len(rows) >= 3 else rows[-len(rows):]
@@ -127,6 +133,36 @@ def telegram_webhook():
             send_telegram_message(chat_id, f"❌ Ошибка при получении лидов: {e}")
         return "ok"
 
+    if text.startswith("/addprompt "):
+        if user_id != ADMIN_ID:
+            send_telegram_message(chat_id, "⛔ Эта команда доступна только администратору.")
+            return "ok"
+        addition = text[len("/addprompt "):].strip()
+        try:
+            with open("docs/system_prompt.txt", "a", encoding="utf-8") as f:
+                f.write("\n" + addition)
+            global system_prompt
+            system_prompt = load_system_prompt()
+            send_telegram_message(chat_id, "✅ Новый текст добавлен в system prompt.")
+        except Exception as e:
+            send_telegram_message(chat_id, f"❌ Ошибка при добавлении prompt: {e}")
+        return "ok"
+
+    if text.strip() == "/prompt":
+        if user_id != ADMIN_ID:
+            send_telegram_message(chat_id, "⛔ Эта команда доступна только администратору.")
+            return "ok"
+        try:
+            with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
+                current_prompt = f.read()
+            if len(current_prompt) > 4000:
+                send_telegram_message(chat_id, "⚠️ Промпт слишком длинный.")
+            else:
+                send_telegram_message(chat_id, f"📝 Текущий prompt:\n\n{current_prompt}")
+        except Exception as e:
+            send_telegram_message(chat_id, f"❌ Ошибка при чтении prompt: {e}")
+        return "ok"
+
     # FSM логика
     if user_id in fsm_state:
         step = fsm_state[user_id]
@@ -138,9 +174,9 @@ def telegram_webhook():
             return "ok"
         elif step == "ask_platform":
             lead_data[user_id]["platform"] = answer
-            if "whatsapp" in answer.lower():
+            if any(w in answer.lower() for w in ["whatsapp", "ватсап", "вотсап"]):
                 fsm_state[user_id] = "ask_phone"
-                send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
+                send_telegram_message(chat_id, "📞 Напишите, пожалуйста, номер WhatsApp:")
             else:
                 fsm_state[user_id] = "ask_datetime"
                 send_telegram_message(chat_id, "🗓 Напишите дату и время звонка:")
@@ -165,7 +201,7 @@ def telegram_webhook():
                     time_part,
                     lead_data[user_id].get("platform", ""),
                     "",  # проект
-                    ""   # язык
+                    language_code
                 ])
                 send_telegram_message(chat_id, "✅ Данные записаны. Менеджер свяжется с вами в удобное время.")
             except Exception as e:
@@ -174,7 +210,7 @@ def telegram_webhook():
             lead_data.pop(user_id)
             return "ok"
 
-    # Запуск FSM по желанию клиента
+    # Старт FSM по ключевым словам
     if "звонок" in text.lower() or "созвон" in text.lower() or "консультац" in text.lower():
         fsm_state[user_id] = "ask_name"
         lead_data[user_id] = {}
@@ -187,6 +223,7 @@ def telegram_webhook():
         return "rate limit", 429
     last_message_time[user_id] = now
 
+    # Генерация обычного ответа
     sessions.setdefault(user_id, [])
     history = sessions[user_id][-6:]
 
@@ -203,7 +240,7 @@ def telegram_webhook():
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
-        reply = "Произошла техническая ошибка. Попробуйте позже."
+        reply = get_greeting(language_code)  # fallback — просто приветствие
 
     sessions[user_id] = (history + [
         {"role": "user", "content": text},

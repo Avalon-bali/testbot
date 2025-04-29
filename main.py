@@ -3,7 +3,6 @@ import openai
 import requests
 import os
 import time
-import re
 
 app = Flask(__name__)
 
@@ -14,35 +13,6 @@ openai.api_key = OPENAI_API_KEY
 sessions = {}
 last_message_time = {}
 
-# 🔧 Экранирование MarkdownV2
-def escape_markdown_v2_strict(text):
-    escape_chars = r"_*[]()~`>#+-=|{}.!$\\:,?"
-    text = re.sub(r"([{}])".format(re.escape(escape_chars)), r"\\\1", text)
-    text = text.replace('%', '\\%')
-    return text
-
-# ✅ Форматирование текста с жирными фразами
-def format_text(text):
-    important_phrases = [
-        "Типы апартаментов",
-        "Начальная стоимость",
-        "Ожидаемая доходность",
-        "Инфраструктура",
-        "Документы и гарантии",
-        "Особенности проекта",
-        "организовать консультацию",
-        "обсудить ваши вопросы на звонке",
-        "согласовать личный звонок",
-        "индивидуальная консультация",
-        "Как вам будет удобно: утром или вечером?"
-    ]
-    for phrase in important_phrases:
-        text = text.replace(phrase, f"**{phrase}**")
-    text = escape_markdown_v2_strict(text)
-    text = text.replace("**", "\\*\\*")
-    return text
-
-# 📚 Загрузка файлов
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -59,35 +29,30 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
-# 📩 Отправка сообщения в Telegram
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    formatted_text = format_text(text)
     payload = {
         "chat_id": chat_id,
-        "text": formatted_text,
-        "parse_mode": "MarkdownV2",
+        "text": text,
+        "parse_mode": "Markdown",  # вернулся на простой Markdown
         "disable_web_page_preview": False
     }
     response = requests.post(url, json=payload)
     if response.status_code != 200:
         print("Ошибка отправки текста:", response.text)
 
-# 🖼 Отправка фото
 def send_telegram_photo(chat_id, photo_path, caption=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     with open(photo_path, "rb") as photo_file:
         files = {"photo": photo_file}
         data = {"chat_id": chat_id}
         if caption:
-            caption = escape_markdown_v2_strict(caption).replace("**", "\\*\\*")
             data["caption"] = caption
-            data["parse_mode"] = "MarkdownV2"
+            data["parse_mode"] = "Markdown"
         response = requests.post(url, data=data, files=files)
     if response.status_code != 200:
         print("Ошибка отправки фото:", response.text)
 
-# 🔍 Поиск логотипа
 def find_logo():
     folder = "docs/AVALON"
     if os.path.exists(folder):
@@ -96,7 +61,6 @@ def find_logo():
             return os.path.join(folder, files[0])
     return None
 
-# 🚀 Обработка сообщений
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
@@ -148,7 +112,6 @@ def telegram_webhook():
 
     return "ok"
 
-# Проверка
 @app.route("/", methods=["GET"])
 def home():
     return "Avalon GPT работает стабильно."

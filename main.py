@@ -3,6 +3,10 @@ import openai
 import requests
 import os
 import time
+import re
+import gspread
+from datetime import datetime
+from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
@@ -13,7 +17,17 @@ openai.api_key = OPENAI_API_KEY
 sessions = {}
 last_message_time = {}
 
-# 📚 Загрузка файлов
+# Google Sheets авторизация
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("avalon-424200-6e629f8957b0.json", scope)
+gsheet = gspread.authorize(creds)
+sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1  # первая вкладка
+
+# FSM память
+fsm_state = {}
+lead_data = {}
+
+# Загрузка базы
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -30,7 +44,6 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
-# 📩 Отправка сообщения в Telegram
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
@@ -39,11 +52,8 @@ def send_telegram_message(chat_id, text):
         "parse_mode": "Markdown",
         "disable_web_page_preview": False
     }
-    response = requests.post(url, json=payload)
-    if response.status_code != 200:
-        print("Ошибка отправки текста:", response.text)
+    requests.post(url, json=payload)
 
-# 🖼 Отправка фото
 def send_telegram_photo(chat_id, photo_path, caption=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     with open(photo_path, "rb") as photo_file:
@@ -52,11 +62,8 @@ def send_telegram_photo(chat_id, photo_path, caption=None):
         if caption:
             data["caption"] = caption
             data["parse_mode"] = "Markdown"
-        response = requests.post(url, data=data, files=files)
-    if response.status_code != 200:
-        print("Ошибка отправки фото:", response.text)
+        requests.post(url, data=data, files=files)
 
-# 🔍 Поиск логотипа
 def find_logo():
     folder = "docs/AVALON"
     if os.path.exists(folder):
@@ -65,7 +72,6 @@ def find_logo():
             return os.path.join(folder, files[0])
     return None
 
-# 🚀 Обработка Webhook от Telegram
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
@@ -77,7 +83,7 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    # 👉 Команда для добавления в system prompt
+    # Команда /addprompt
     if text.startswith("/addprompt "):
         addition = text[len("/addprompt "):].strip()
         try:
@@ -90,17 +96,71 @@ def telegram_webhook():
             send_telegram_message(chat_id, f"❌ Ошибка при добавлении prompt: {e}")
         return "ok"
 
-    # 👉 Команда для просмотра текущего system prompt
+    # Команда /prompt
     if text.strip() == "/prompt":
         try:
             with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
                 current_prompt = f.read()
             if len(current_prompt) > 4000:
-                send_telegram_message(chat_id, "⚠️ Промпт слишком длинный для отправки целиком.")
+                send_telegram_message(chat_id, "⚠️ Промпт слишком длинный.")
             else:
                 send_telegram_message(chat_id, f"📝 Текущий prompt:\n\n{current_prompt}")
         except Exception as e:
             send_telegram_message(chat_id, f"❌ Ошибка при чтении prompt: {e}")
+        return "ok"
+
+    # FSM: шаги опроса
+    if user_id in fsm_state:
+        step = fsm_state[user_id]
+        answer = text.strip()
+        if step == "ask_name":
+            lead_data[user_id]["name"] = answer
+            fsm_state[user_id] = "ask_platform"
+            send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
+            return "ok"
+        elif step == "ask_platform":
+            lead_data[user_id]["platform"] = answer
+            if "whatsapp" in answer.lower():
+                fsm_state[user_id] = "ask_phone"
+                send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
+            else:
+                fsm_state[user_id] = "ask_datetime"
+                send_telegram_message(chat_id, "🗓 Напишите дату и время звонка:")
+            return "ok"
+        elif step == "ask_phone":
+            lead_data[user_id]["phone"] = answer
+            fsm_state[user_id] = "ask_datetime"
+            send_telegram_message(chat_id, "🗓 Напишите дату и время звонка:")
+            return "ok"
+        elif step == "ask_datetime":
+            try:
+                now = datetime.now().strftime("%Y-%m-%d %H:%M")
+                username = message.get("from", {}).get("username", "")
+                date_part = answer.split()[0] if len(answer.split()) > 0 else ""
+                time_part = answer.split()[1] if len(answer.split()) > 1 else ""
+                sheet.append_row([
+                    now,
+                    lead_data[user_id].get("name", ""),
+                    f"@{username}",
+                    lead_data[user_id].get("phone", ""),
+                    date_part,
+                    time_part,
+                    lead_data[user_id].get("platform", ""),
+                    "",  # проект
+                    ""   # язык
+                ])
+                send_telegram_message(chat_id, "✅ Данные записаны. Менеджер свяжется с вами в удобное время.")
+            except Exception as e:
+                send_telegram_message(chat_id, f"❌ Ошибка при записи в таблицу: {e}")
+            fsm_state.pop(user_id)
+            lead_data.pop(user_id)
+            return "ok"
+
+    # Запуск опроса при желании на звонок
+    if "звонок" in text.lower() or "созвон" in text.lower() or "консультац" in text.lower():
+        fsm_state[user_id] = "ask_name"
+        lead_data[user_id] = {}
+        send_telegram_message(chat_id, "👋 Напишите, пожалуйста, ваше имя:")
         return "ok"
 
     now = time.time()
@@ -125,7 +185,6 @@ def telegram_webhook():
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"Ошибка OpenAI: {e}")
         reply = "Произошла техническая ошибка. Попробуйте позже."
 
     sessions[user_id] = (history + [
@@ -143,7 +202,6 @@ def telegram_webhook():
 
     return "ok"
 
-# 🛠 Проверка сервера
 @app.route("/", methods=["GET"])
 def home():
     return "Avalon GPT работает стабильно."

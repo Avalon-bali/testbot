@@ -32,7 +32,9 @@ def load_documents():
         if filename.endswith(".txt") and filename != "system_prompt.txt":
             with open(os.path.join(folder, filename), "r", encoding="utf-8") as f:
                 context_parts.append(f.read())
-    return "\n\n".join(context_parts)
+    return "
+
+".join(context_parts)
 
 def load_system_prompt():
     with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
@@ -73,140 +75,6 @@ def detect_time_of_day(text):
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
-    data = request.get_json()
-    message = data.get("message", {})
-    chat_id = message.get("chat", {}).get("id")
-    user_id = message.get("from", {}).get("id")
-    text = message.get("text", "")
-    language_code = message.get("from", {}).get("language_code", "en")
-    username = message.get("from", {}).get("username", "")
-
-    if not chat_id:
-        return "no chat_id", 400
-
-    now = time.time()
-    last_time = last_message_time.get(user_id, 0)
-    if now - last_time < 1:
-        return "rate limit", 429
-    last_message_time[user_id] = now
-
-    if text.strip() == "/leads":
-        if user_id != ADMIN_ID:
-            send_telegram_message(chat_id, "⛔ Эта команда доступна только администратору.")
-            return "ok"
-        try:
-            rows = sheet.get_all_values()
-            last = rows[-3:] if len(rows) >= 3 else rows[-len(rows):]
-            for r in last:
-                msg = (
-                    f"*Имя:* {r[1]}\n"
-                    f"*Telegram:* {r[2]}\n"
-                    f"*WhatsApp:* {r[3]}\n"
-                    f"*Дата звонка:* {r[4]} {r[5]}\n"
-                    f"*Платформа:* {r[6]}\n"
-                    f"*Проект:* {r[7]}\n"
-                    f"*Язык:* {r[8]}"
-                )
-                send_telegram_message(chat_id, msg)
-        except Exception as e:
-            send_telegram_message(chat_id, f"❌ Ошибка при получении лидов: {e}")
-        return "ok"
-
-    if text.startswith("/addprompt "):
-        if user_id != ADMIN_ID:
-            send_telegram_message(chat_id, "⛔ Эта команда доступна только администратору.")
-            return "ok"
-        addition = text[len("/addprompt "):].strip()
-        try:
-            with open("docs/system_prompt.txt", "a", encoding="utf-8") as f:
-                f.write("\n" + addition)
-            global system_prompt
-            system_prompt = load_system_prompt()
-            send_telegram_message(chat_id, "✅ Новый текст добавлен.")
-        except Exception as e:
-            send_telegram_message(chat_id, f"❌ Ошибка: {e}")
-        return "ok"
-
-    if text.strip() == "/prompt":
-        if user_id != ADMIN_ID:
-            send_telegram_message(chat_id, "⛔ Эта команда доступна только администратору.")
-            return "ok"
-        try:
-            with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
-                p = f.read()
-            send_telegram_message(chat_id, p if len(p) < 4000 else "⚠️ Промпт слишком длинный.")
-        except Exception as e:
-            send_telegram_message(chat_id, f"❌ Ошибка: {e}")
-        return "ok"
-
-    if user_id in fsm_state:
-        step = fsm_state[user_id]
-        answer = text.strip()
-        if step == "ask_name":
-            lead_data[user_id]["name"] = answer
-            fsm_state[user_id] = "ask_platform"
-            send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
-            return "ok"
-        elif step == "ask_platform":
-            lead_data[user_id]["platform"] = answer
-            if any(w in answer.lower() for w in ["whatsapp", "ватсап", "вотсап"]):
-                fsm_state[user_id] = "ask_phone"
-                send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
-            else:
-                fsm_state[user_id] = "ask_datetime"
-                send_telegram_message(chat_id, "🗓 Укажите дату и время звонка:")
-            return "ok"
-        elif step == "ask_phone":
-            lead_data[user_id]["phone"] = answer
-            fsm_state[user_id] = "ask_datetime"
-            send_telegram_message(chat_id, "🗓 Укажите дату и время звонка:")
-            return "ok"
-        elif step == "ask_datetime":
-            try:
-                now = datetime.now().strftime("%Y-%m-%d %H:%M")
-                sheet.append_row([
-                    now,
-                    lead_data[user_id].get("name", ""),
-                    f"@{username}",
-                    lead_data[user_id].get("phone", ""),
-                    answer.split()[0],
-                    answer.split()[1] if len(answer.split()) > 1 else "",
-                    lead_data[user_id].get("platform", ""),
-                    "",  # проект
-                    language_code
-                ])
-                when = detect_time_of_day(answer)
-                send_telegram_message(chat_id, f"✅ Отлично! Все данные переданы менеджеру. Мы свяжемся с вами {when}.")
-            except Exception as e:
-                send_telegram_message(chat_id, f"❌ Ошибка при записи: {e}")
-            fsm_state.pop(user_id)
-            lead_data.pop(user_id)
-            return "ok"
-
-    if "звонок" in text.lower() or "созвон" in text.lower() or "консультац" in text.lower():
-        fsm_state[user_id] = "ask_name"
-        lead_data[user_id] = {}
-        send_telegram_message(chat_id, "👋 Напишите, пожалуйста, ваше имя:")
-        return "ok"
-
-    sessions.setdefault(user_id, [])
-    history = sessions[user_id][-6:]
-    messages = [{"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}] + history + [{"role": "user", "content": text}]
-
-    try:
-        response = openai.chat.completions.create(model="gpt-4o", messages=messages)
-        reply = response.choices[0].message.content.strip()
-    except Exception as e:
-        reply = "Произошла ошибка. Попробуйте позже."
-
-    sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-10:]
-    send_telegram_message(chat_id, reply)
-
-    if any(k in text.lower() for k in ["авалон", "avalon", "ом", "buddha", "budda", "tao"]):
-        logo = find_logo()
-        if logo:
-            send_telegram_photo(chat_id, logo, caption="Avalon — инвестиции на Бали 🌴")
-
     return "ok"
 
 @app.route("/", methods=["GET"])

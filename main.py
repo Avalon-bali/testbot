@@ -3,7 +3,6 @@ import openai
 import requests
 import os
 import time
-import re
 import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
@@ -19,11 +18,10 @@ last_message_time = {}
 
 # Google Sheets авторизация
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("avalon-424200-6e629f8957b0.json", scope)
+creds = ServiceAccountCredentials.from_json_keyfile_name("/etc/secrets/google-credentials.json", scope)
 gsheet = gspread.authorize(creds)
-sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1  # первая вкладка
+sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
-# FSM память
 fsm_state = {}
 lead_data = {}
 
@@ -83,7 +81,7 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    # Команда /addprompt
+    # Команды prompt
     if text.startswith("/addprompt "):
         addition = text[len("/addprompt "):].strip()
         try:
@@ -96,7 +94,6 @@ def telegram_webhook():
             send_telegram_message(chat_id, f"❌ Ошибка при добавлении prompt: {e}")
         return "ok"
 
-    # Команда /prompt
     if text.strip() == "/prompt":
         try:
             with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
@@ -109,7 +106,28 @@ def telegram_webhook():
             send_telegram_message(chat_id, f"❌ Ошибка при чтении prompt: {e}")
         return "ok"
 
-    # FSM: шаги опроса
+    if text.strip() == "/leads":
+        try:
+            rows = sheet.get_all_values()
+            last = rows[-3:] if len(rows) >= 3 else rows[-len(rows):]
+            messages = []
+            for r in last:
+                messages.append(
+                    f"*Имя:* {r[1]}\n"
+                    f"*Telegram:* {r[2]}\n"
+                    f"*WhatsApp:* {r[3]}\n"
+                    f"*Дата звонка:* {r[4]} {r[5]}\n"
+                    f"*Платформа:* {r[6]}\n"
+                    f"*Проект:* {r[7]}\n"
+                    f"*Язык:* {r[8]}"
+                )
+            for m in messages:
+                send_telegram_message(chat_id, m)
+        except Exception as e:
+            send_telegram_message(chat_id, f"❌ Ошибка при получении лидов: {e}")
+        return "ok"
+
+    # FSM логика
     if user_id in fsm_state:
         step = fsm_state[user_id]
         answer = text.strip()
@@ -156,7 +174,7 @@ def telegram_webhook():
             lead_data.pop(user_id)
             return "ok"
 
-    # Запуск опроса при желании на звонок
+    # Запуск FSM по желанию клиента
     if "звонок" in text.lower() or "созвон" in text.lower() or "консультац" in text.lower():
         fsm_state[user_id] = "ask_name"
         lead_data[user_id] = {}

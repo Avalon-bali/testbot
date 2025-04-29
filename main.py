@@ -15,19 +15,21 @@ sessions = {}
 last_message_time = {}
 
 # 🔧 Экранирование MarkdownV2
-def escape_markdown_v2_full(text):
-    escape_chars = r"_*[]()~`>#+-=|{}.!$\\"
-    return re.sub(r"([{}])".format(re.escape(escape_chars)), r"\\\1", text)
+def escape_markdown_v2_strict(text):
+    escape_chars = r"_*[]()~`>#+-=|{}.!$\\:,?"
+    text = re.sub(r"([{}])".format(re.escape(escape_chars)), r"\\\1", text)
+    text = text.replace('%', '\\%')
+    return text
 
-# ✅ Форматирование важных фраз + экранирование
+# ✅ Форматирование текста с жирными фразами
 def format_text(text):
     important_phrases = [
+        "Типы апартаментов",
+        "Начальная стоимость",
+        "Ожидаемая доходность",
+        "Инфраструктура",
+        "Документы и гарантии",
         "Особенности проекта",
-        "Инфраструктура:",
-        "Локация:",
-        "Управляющая компания:",
-        "Цены:",
-        "визуализацией и подробной информацией о проекте в презентации",
         "организовать консультацию",
         "обсудить ваши вопросы на звонке",
         "согласовать личный звонок",
@@ -36,11 +38,11 @@ def format_text(text):
     ]
     for phrase in important_phrases:
         text = text.replace(phrase, f"**{phrase}**")
-    text = escape_markdown_v2_full(text)
+    text = escape_markdown_v2_strict(text)
     text = text.replace("**", "\\*\\*")
     return text
 
-# 📚 Загрузка базы знаний
+# 📚 Загрузка файлов
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -57,7 +59,7 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
-# 📩 Отправка сообщений в Telegram
+# 📩 Отправка сообщения в Telegram
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     formatted_text = format_text(text)
@@ -78,7 +80,7 @@ def send_telegram_photo(chat_id, photo_path, caption=None):
         files = {"photo": photo_file}
         data = {"chat_id": chat_id}
         if caption:
-            caption = escape_markdown_v2_full(caption).replace("**", "\\*\\*")
+            caption = escape_markdown_v2_strict(caption).replace("**", "\\*\\*")
             data["caption"] = caption
             data["parse_mode"] = "MarkdownV2"
         response = requests.post(url, data=data, files=files)
@@ -94,7 +96,7 @@ def find_logo():
             return os.path.join(folder, files[0])
     return None
 
-# 🚀 Основной маршрут Webhook
+# 🚀 Обработка сообщений
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
@@ -146,7 +148,7 @@ def telegram_webhook():
 
     return "ok"
 
-# ✅ Проверка сервера
+# Проверка
 @app.route("/", methods=["GET"])
 def home():
     return "Avalon GPT работает стабильно."

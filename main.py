@@ -13,13 +13,13 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# --- Google Sheets настройка
+# Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name("/etc/secrets/google-credentials.json", scope)
 gsheet = gspread.authorize(creds)
 sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
-# --- Память
+# Память
 sessions = {}
 fsm_state = {}
 lead_data = {}
@@ -58,7 +58,7 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    # FSM: Обработка этапов лида
+    # FSM этапы
     if user_id in fsm_state:
         step = fsm_state[user_id]
         answer = text
@@ -97,31 +97,24 @@ def telegram_webhook():
                     "",
                     language_code
                 ])
-                send_telegram_message(chat_id, "✅ Отлично! Все данные переданы менеджеру. Мы скоро с вами свяжемся.")
+                send_telegram_message(chat_id, "✅ Отлично! Все данные переданы менеджеру. Мы свяжемся с вами в указанное время.")
             except Exception as e:
                 send_telegram_message(chat_id, f"❌ Ошибка записи: {e}")
             fsm_state.pop(user_id)
             lead_data.pop(user_id)
             return "ok"
 
-    # Если пользователь интересуется консультацией
-    if any(x in text.lower() for x in ["звонок", "созвон", "консультац"]):
-        fsm_state[user_id] = "ask_name"
-        lead_data[user_id] = {}
-        send_telegram_message(chat_id, "👋 Напишите, пожалуйста, ваше имя:")
-        return "ok"
-
-    # Старт
+    # Команда старт
     if text == "/start":
-        welcome = "👋 Привет! Я — AI ассистент Avalon.\nСпросите про OM, BUDDHA, TAO или про инвестиции на Бали."
         sessions[user_id] = []
-        send_telegram_message(chat_id, welcome)
+        send_telegram_message(chat_id, "👋 Привет! Я — AI ассистент Avalon.\nСпросите про OM, BUDDHA, TAO или инвестиции на Бали.")
         return "ok"
 
-    # История сообщений
+    # Подготовка истории
     history = sessions.get(user_id, [])
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}
+        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\n"
+                                      "Если пользователь хочет звонок или консультацию, ответь только: [CALL_REQUEST]."},
     ] + history[-6:] + [{"role": "user", "content": text}]
 
     try:
@@ -133,6 +126,14 @@ def telegram_webhook():
     except Exception as e:
         reply = f"⚠️ Ошибка OpenAI: {e}"
 
+    # Обработка запроса на звонок
+    if reply == "[CALL_REQUEST]":
+        fsm_state[user_id] = "ask_name"
+        lead_data[user_id] = {}
+        send_telegram_message(chat_id, "👋 Напишите, пожалуйста, ваше имя:")
+        return "ok"
+
+    # Сохраняем диалог
     sessions[user_id] = (history + [
         {"role": "user", "content": text},
         {"role": "assistant", "content": reply}
@@ -143,7 +144,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon AI работает."
+    return "Avalon AI бот запущен."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

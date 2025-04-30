@@ -13,19 +13,17 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name("/etc/secrets/google-credentials.json", scope)
 gsheet = gspread.authorize(creds)
 sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
-# Состояния
 sessions = {}
 fsm_state = {}
 lead_data = {}
 fsm_timestamps = {}
 
-FSM_TIMEOUT = 600  # 10 минут
+FSM_TIMEOUT = 600
 
 def load_documents():
     folder = "docs"
@@ -48,14 +46,21 @@ def send_telegram_message(chat_id, text):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     requests.post(url, json=payload)
 
-def get_lang(language_code):
-    return "ru" if language_code in ["ru", "uk"] else "en"
+def send_telegram_photo(chat_id, photo_url, caption=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    payload = {"chat_id": chat_id, "photo": photo_url}
+    if caption:
+        payload["caption"] = caption
+        payload["parse_mode"] = "Markdown"
+    requests.post(url, json=payload)
+
+def get_lang(code):
+    return "ru" if code in ["ru", "uk"] else "en"
 
 def fsm_timeout_check(user_id):
     if user_id in fsm_timestamps:
         if time.time() - fsm_timestamps[user_id] > FSM_TIMEOUT:
             fsm_state.pop(user_id, None)
-            lead_data.pop(user_id, None)
             fsm_timestamps.pop(user_id, None)
             print(f"⏳ FSM session for {user_id} timed out.")
             return True
@@ -69,8 +74,8 @@ def telegram_webhook():
     user_id = message.get("from", {}).get("id")
     text = message.get("text", "").strip()
     username = message.get("from", {}).get("username", "")
-    language_code = message.get("from", {}).get("language_code", "en")
-    lang = get_lang(language_code)
+    lang_code = message.get("from", {}).get("language_code", "en")
+    lang = get_lang(lang_code)
 
     if not chat_id:
         return "no chat_id", 400
@@ -82,36 +87,29 @@ def telegram_webhook():
     if user_id in fsm_state:
         fsm_timestamps[user_id] = time.time()
         step = fsm_state[user_id]
-        answer = text.strip()
+        answer = text
 
-        # Проверка: пользователь задал новый вопрос
         if any(answer.lower().startswith(q) for q in ["где", "что", "почему", "как", "когда", "do", "what", "where", "who", "how", "why"]):
-            print(f"🧩 {user_id} задал вопрос вне FSM: «{answer}». Прерываем FSM.")
+            print(f"🧩 FSM interrupted by question from {user_id}: {answer}")
             fsm_state.pop(user_id, None)
-            lead_data.pop(user_id, None)
             fsm_timestamps.pop(user_id, None)
         else:
             try:
                 if step == "ask_name":
+                    lead_data[user_id] = lead_data.get(user_id, {})
                     lead_data[user_id]["name"] = answer
                     fsm_state[user_id] = "ask_platform"
-                    msg = "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet" if lang == "ru" else "📱 Choose platform: WhatsApp / Telegram / Zoom / Google Meet"
-                    send_telegram_message(chat_id, msg)
+                    send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet" if lang == "ru" else "📱 Choose platform: WhatsApp / Telegram / Zoom / Google Meet")
                     return "ok"
 
                 elif step == "ask_platform":
-                    platform = answer.lower()
-                    lead_data[user_id]["platform"] = platform
-                    if "whatsapp" in platform or "ватсап" in platform or "вотсап" in platform:
+                    lead_data[user_id]["platform"] = answer
+                    if "whatsapp" in answer.lower():
                         fsm_state[user_id] = "ask_phone"
-                        msg = "📞 Напишите номер WhatsApp:" if lang == "ru" else "📞 Please enter your WhatsApp number:"
-                        send_telegram_message(chat_id, msg)
-                    elif any(p in platform for p in ["telegram", "zoom", "google"]):
-                        fsm_state[user_id] = "ask_datetime"
-                        msg = "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?"
-                        send_telegram_message(chat_id, msg)
+                        send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:" if lang == "ru" else "📞 Please enter your WhatsApp number:")
                     else:
-                        send_telegram_message(chat_id, "❓ Пожалуйста, выберите один из указанных вариантов." if lang == "ru" else "❓ Please choose one of the listed options.")
+                        fsm_state[user_id] = "ask_datetime"
+                        send_telegram_message(chat_id, "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?")
                     return "ok"
 
                 elif step == "ask_phone":
@@ -120,8 +118,7 @@ def telegram_webhook():
                         return "ok"
                     lead_data[user_id]["phone"] = answer
                     fsm_state[user_id] = "ask_datetime"
-                    msg = "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?"
-                    send_telegram_message(chat_id, msg)
+                    send_telegram_message(chat_id, "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?")
                     return "ok"
 
                 elif step == "ask_datetime":
@@ -136,32 +133,30 @@ def telegram_webhook():
                         answer.split()[1] if len(answer.split()) > 1 else "",
                         lead_data[user_id].get("platform", ""),
                         "",
-                        language_code
+                        lang_code
                     ])
-                    msg = "✅ Все данные записаны. Менеджер скоро свяжется с вами." if lang == "ru" else "✅ Your details are recorded. Our manager will contact you soon."
-                    send_telegram_message(chat_id, msg)
+                    send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер свяжется с вами." if lang == "ru" else "✅ Details saved. Manager will contact you soon.")
                     fsm_state.pop(user_id, None)
                     lead_data.pop(user_id, None)
                     fsm_timestamps.pop(user_id, None)
                     return "ok"
-
             except Exception as e:
-                print(f"❌ FSM error for {user_id}:", e)
-                send_telegram_message(chat_id, "❌ Произошла ошибка. Попробуйте позже." if lang == "ru" else "❌ An error occurred. Please try again later.")
+                print(f"❌ FSM error: {e}")
+                send_telegram_message(chat_id, "⚠️ Ошибка. Попробуйте позже." if lang == "ru" else "⚠️ Error. Please try again later.")
                 return "ok"
 
     if text == "/start":
         sessions[user_id] = []
-        msg = "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?" \
+        welcome = "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?" \
             if lang == "ru" else \
             "👋 Hello! I’m the AI assistant of Avalon.\nI can help you with our projects, investment options, and life in Bali. How can I assist you?"
-        send_telegram_message(chat_id, msg)
+        send_telegram_message(chat_id, welcome)
         return "ok"
 
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\nIf the user requests a call or consultation, return only: [CALL_REQUEST]."},
-        *history[-6:],  # последние 6 сообщений
+        *history[-6:],
         {"role": "user", "content": text}
     ]
 
@@ -179,9 +174,18 @@ def telegram_webhook():
         fsm_state[user_id] = "ask_name"
         lead_data[user_id] = {}
         fsm_timestamps[user_id] = time.time()
-        msg = "👋 Как к вам можно обращаться?" if lang == "ru" else "👋 May I have your name?"
-        send_telegram_message(chat_id, msg)
+        send_telegram_message(chat_id, "👋 Как к вам можно обращаться?" if lang == "ru" else "👋 May I have your name?")
         return "ok"
+
+    trigger = text.lower()
+    if "ом" in trigger or "om" in trigger:
+        send_telegram_photo(chat_id, "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/OM.jpg?raw=true", "🏡 *OM Club House* — премиум-апартаменты в Чангу.")
+    elif "тао" in trigger or "tao" in trigger:
+        send_telegram_photo(chat_id, "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/TAO.jpg?raw=true", "🌿 *TAO* — бутик-апартаменты в Бераве.")
+    elif "будда" in trigger or "buddha" in trigger:
+        send_telegram_photo(chat_id, "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/BUDDHA.jpg?raw=true", "🧘 *BUDDHA Club House* — инвестиционный апарт-отель в Чангу.")
+    elif "авалон" in trigger or "avalon" in trigger:
+        send_telegram_photo(chat_id, "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg?raw=true", "🏢 *AVALON* — девелоперская компания с украинскими корнями на Бали.")
 
     sessions[user_id] = (history + [
         {"role": "user", "content": text},

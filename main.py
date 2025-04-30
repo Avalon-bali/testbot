@@ -22,10 +22,9 @@ sessions = {}
 fsm_state = {}
 lead_data = {}
 fsm_timestamps = {}
-
 FSM_TIMEOUT = 600
-
 resume_phrases = ["продолжим", "дальше", "давай продолжим", "ок, да", "запиши", "продолжи", "вернёмся", "да, записывай"]
+question_keywords = ["где", "что", "почему", "как", "когда", "какой", "куда", "сколько", "офис", "находится", "расположение"]
 
 def load_documents():
     folder = "docs"
@@ -39,6 +38,9 @@ def load_documents():
 def load_system_prompt():
     with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
         return f.read()
+
+documents_context = load_documents()
+system_prompt = load_system_prompt()
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -103,7 +105,7 @@ def telegram_webhook():
         step = fsm_state[user_id]
         answer = text
 
-        if any(answer.lower().startswith(q) for q in ["где", "что", "почему", "как", "когда", "do", "what", "where", "who", "how", "why"]):
+        if any(word in answer.lower() for word in question_keywords):
             fsm_state.pop(user_id, None)
             fsm_timestamps.pop(user_id, None)
         else:
@@ -150,7 +152,7 @@ def telegram_webhook():
                     lead_data.pop(user_id, None)
                     fsm_timestamps.pop(user_id, None)
                     return "ok"
-            except Exception as e:
+            except Exception:
                 send_telegram_message(chat_id, "⚠️ Произошла ошибка. Попробуйте позже." if lang == "ru" else "⚠️ An error occurred. Please try again later.")
                 return "ok"
 
@@ -194,68 +196,56 @@ def telegram_webhook():
 
     trigger = text.lower()
 
-if "ом" in trigger or "om" in trigger:
-    send_telegram_photo(
-        chat_id,
-        "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/OM.jpg?raw=true",
-        "🏡 *OM Club House* — апартаменты премиум-класса в Чангу, Бали.
+    if "ом" in trigger or "om" in trigger:
+        send_telegram_photo(
+            chat_id,
+            "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/OM.jpg?raw=true",
+            "🏡 *OM Club House* — апартаменты премиум-класса в Чангу, Бали.\n\n"
+            "• Только 1-bedroom апартаменты с джакузи и террасой.\n"
+            "• Расположен в 2 минутах от пляжа, в центре Canggu.\n"
+            "• Подходит как для жизни, так и для инвестиций."
+        )
+        return "ok"
 
-"
-        "• Только 1-bedroom апартаменты с джакузи и террасой.
-"
-        "• Расположен в 2 минутах от пляжа, в центре Canggu.
-"
-        "• Подходит как для жизни, так и для инвестиций."
-    )
-    return "ok"
+    elif "тао" in trigger or "tao" in trigger:
+        send_telegram_photo(
+            chat_id,
+            "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/TAO.jpg?raw=true",
+            "🌿 *TAO Club House* — бутик-комплекс апартаментов в Бериве.\n\n"
+            "• Закрытая территория, 3 этажа, минималистичный стиль.\n"
+            "• Апартаменты с террасами, зелёными зонами и бассейнами.\n"
+            "• Рядом с пляжем и ресторанными кварталами."
+        )
+        return "ok"
 
-elif "тао" in trigger or "tao" in trigger:
-    send_telegram_photo(
-        chat_id,
-        "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/TAO.jpg?raw=true",
-        "🌿 *TAO Club House* — бутик-комплекс апартаментов в Бериве.
+    elif "будда" in trigger or "buddha" in trigger:
+        send_telegram_photo(
+            chat_id,
+            "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/BUDDHA.jpg?raw=true",
+            "🧘 *BUDDHA Club House* — инвестиционный апарт-отель в сердце Чангу.\n\n"
+            "• Апартаменты с подземным паркингом, коворкингом и кинотеатром.\n"
+            "• Идеален для аренды и получения стабильного дохода.\n"
+            "• Запуск — 2025. Уже доступны бронирования."
+        )
+        return "ok"
 
-"
-        "• Закрытая территория, 3 этажа, минималистичный стиль.
-"
-        "• Апартаменты с террасами, зелёными зонами и бассейнами.
-"
-        "• Рядом с пляжем и ресторанными кварталами."
-    )
-    return "ok"
+    elif "авалон" in trigger or "avalon" in trigger:
+        send_telegram_photo(
+            chat_id,
+            "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg?raw=true",
+            "🏢 *AVALON* — девелоперская компания с украинскими корнями на Бали.\n\n"
+            "Мы создаём современные апартаменты, сочетая комфорт и инвестиционную привлекательность.\n\n"
+            "• Проекты: OM, BUDDHA и TAO — в Чангу, Бераве и Переренане.\n"
+            "• Опыт 25+ лет. Работаем на Бали с 2022 года."
+        )
+        return "ok"
 
-elif "будда" in trigger or "buddha" in trigger:
-    send_telegram_photo(
-        chat_id,
-        "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/BUDDHA.jpg?raw=true",
-        "🧘 *BUDDHA Club House* — инвестиционный апарт-отель в сердце Чангу.
+    sessions[user_id] = (history + [
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": reply}
+    ])[-10:]
 
-"
-        "• Апартаменты с подземным паркингом, коворкингом и кинотеатром.
-"
-        "• Идеален для аренды и получения стабильного дохода.
-"
-        "• Запуск — 2025. Уже доступны бронирования."
-    )
-    return "ok"
-
-elif "авалон" in trigger or "avalon" in trigger:
-    send_telegram_photo(
-        chat_id,
-        "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg?raw=true",
-        "🏢 *AVALON* — девелоперская компания с украинскими корнями на Бали.
-
-"
-        "Мы создаём современные апартаменты, сочетая комфорт и инвестиционную привлекательность.
-
-"
-        "• Проекты: OM, BUDDHA и TAO — в Чангу, Бераве и Переренане.
-"
-        "• Опыт 25+ лет. Работаем на Бали с 2022 года."
-    )
-    return "ok"
-
-send_telegram_message(chat_id, reply)
+    send_telegram_message(chat_id, reply)
     return "ok"
 
 @app.route("/", methods=["GET"])

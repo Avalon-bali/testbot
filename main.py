@@ -112,10 +112,22 @@ def telegram_webhook():
             try:
                 lead_data[user_id] = lead_data.get(user_id, {})
                 if step == "ask_name":
+                    lower_answer = answer.lower()
+                    platform_keywords = ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап", "telegram", "телеграм", "зум", "zoom", "google", "meet", "meetings"]
+                    if any(w in lower_answer for w in platform_keywords):
+                        lead_data[user_id]["platform"] = answer
+                        if any(w in lower_answer for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"]):
+                            fsm_state[user_id] = "ask_phone"
+                            send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:" if lang == "ru" else "📞 Please enter your WhatsApp number:")
+                        else:
+                            fsm_state[user_id] = "ask_datetime"
+                            send_telegram_message(chat_id, "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?")
+                        return "ok"
                     lead_data[user_id]["name"] = answer
                     fsm_state[user_id] = "ask_platform"
                     send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet" if lang == "ru" else "📱 Choose platform: WhatsApp / Telegram / Zoom / Google Meet")
                     return "ok"
+
                 elif step == "ask_platform":
                     lead_data[user_id]["platform"] = answer
                     if any(w in answer.lower() for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"]):
@@ -125,6 +137,7 @@ def telegram_webhook():
                         fsm_state[user_id] = "ask_datetime"
                         send_telegram_message(chat_id, "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?")
                     return "ok"
+
                 elif step == "ask_phone":
                     if not any(c.isdigit() for c in answer):
                         send_telegram_message(chat_id, "❌ Неверный номер. Попробуйте ещё раз." if lang == "ru" else "❌ Invalid number. Please try again.")
@@ -133,6 +146,7 @@ def telegram_webhook():
                     fsm_state[user_id] = "ask_datetime"
                     send_telegram_message(chat_id, "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?")
                     return "ok"
+
                 elif step == "ask_datetime":
                     lead_data[user_id]["datetime"] = answer
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -193,57 +207,6 @@ def telegram_webhook():
 
     if reply.startswith("[") and reply.endswith("]") and "CALL_REQUEST" not in reply:
         reply = "⚠️ Произошла техническая ошибка. Пожалуйста, повторите запрос или начните заново." if lang == "ru" else "⚠️ Technical issue. Please try again."
-
-    trigger = text.lower()
-
-    if "ом" in trigger or "om" in trigger:
-        send_telegram_photo(
-            chat_id,
-            "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/OM.jpg?raw=true",
-            "🏡 *OM Club House* — апартаменты премиум-класса в Чангу, Бали.\n\n"
-            "• Только 1-bedroom апартаменты с джакузи и террасой.\n"
-            "• Расположен в 2 минутах от пляжа, в центре Canggu.\n"
-            "• Подходит как для жизни, так и для инвестиций."
-        )
-        return "ok"
-
-    elif "тао" in trigger or "tao" in trigger:
-        send_telegram_photo(
-            chat_id,
-            "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/TAO.jpg?raw=true",
-            "🌿 *TAO Club House* — бутик-комплекс апартаментов в Бериве.\n\n"
-            "• Закрытая территория, 3 этажа, минималистичный стиль.\n"
-            "• Апартаменты с террасами, зелёными зонами и бассейнами.\n"
-            "• Рядом с пляжем и ресторанными кварталами."
-        )
-        return "ok"
-
-    elif "будда" in trigger or "buddha" in trigger:
-        send_telegram_photo(
-            chat_id,
-            "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/BUDDHA.jpg?raw=true",
-            "🧘 *BUDDHA Club House* — инвестиционный апарт-отель в сердце Чангу.\n\n"
-            "• Апартаменты с подземным паркингом, коворкингом и кинотеатром.\n"
-            "• Идеален для аренды и получения стабильного дохода.\n"
-            "• Запуск — 2025. Уже доступны бронирования."
-        )
-        return "ok"
-
-    elif "авалон" in trigger or "avalon" in trigger:
-        send_telegram_photo(
-            chat_id,
-            "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg?raw=true",
-            "🏢 *AVALON* — девелоперская компания с украинскими корнями на Бали.\n\n"
-            "Мы создаём современные апартаменты, сочетая комфорт и инвестиционную привлекательность.\n\n"
-            "• Проекты: OM, BUDDHA и TAO — в Чангу, Бераве и Переренане.\n"
-            "• Опыт 25+ лет. Работаем на Бали с 2022 года."
-        )
-        return "ok"
-
-    sessions[user_id] = (history + [
-        {"role": "user", "content": text},
-        {"role": "assistant", "content": reply}
-    ])[-10:]
 
     send_telegram_message(chat_id, reply)
     return "ok"

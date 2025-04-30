@@ -19,7 +19,7 @@ creds = ServiceAccountCredentials.from_json_keyfile_name("/etc/secrets/google-cr
 gsheet = gspread.authorize(creds)
 sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
-# Память
+# Состояния пользователей
 sessions = {}
 fsm_state = {}
 lead_data = {}
@@ -58,7 +58,7 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    # FSM этапы
+    # FSM логика
     if user_id in fsm_state:
         step = fsm_state[user_id]
         answer = text
@@ -104,17 +104,16 @@ def telegram_webhook():
             lead_data.pop(user_id)
             return "ok"
 
-    # Команда старт
+    # Старт команды
     if text == "/start":
         sessions[user_id] = []
-        send_telegram_message(chat_id, "👋 Привет! Я — AI ассистент Avalon.\nСпросите про OM, BUDDHA, TAO или инвестиции на Бали.")
+        send_telegram_message(chat_id, "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?")
         return "ok"
 
-    # Подготовка истории
+    # История для GPT
     history = sessions.get(user_id, [])
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\n"
-                                      "Если пользователь хочет звонок или консультацию, ответь только: [CALL_REQUEST]."},
+        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\nЕсли пользователь хочет консультацию или звонок, верни только: [CALL_REQUEST]."},
     ] + history[-6:] + [{"role": "user", "content": text}]
 
     try:
@@ -126,14 +125,14 @@ def telegram_webhook():
     except Exception as e:
         reply = f"⚠️ Ошибка OpenAI: {e}"
 
-    # Обработка запроса на звонок
+    # Обработка желания записаться на звонок
     if reply == "[CALL_REQUEST]":
         fsm_state[user_id] = "ask_name"
         lead_data[user_id] = {}
-        send_telegram_message(chat_id, "👋 Напишите, пожалуйста, ваше имя:")
+        send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
         return "ok"
 
-    # Сохраняем диалог
+    # Сохраняем историю
     sessions[user_id] = (history + [
         {"role": "user", "content": text},
         {"role": "assistant", "content": reply}
@@ -144,7 +143,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon AI бот запущен."
+    return "Avalon AI бот работает."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -22,9 +22,7 @@ sessions = {}
 fsm_state = {}
 lead_data = {}
 fsm_timestamps = {}
-
 FSM_TIMEOUT = 600
-
 resume_phrases = ["продолжим", "дальше", "давай продолжим", "ок, да", "запиши", "продолжи", "вернёмся", "да, записывай"]
 
 def load_documents():
@@ -39,6 +37,10 @@ def load_documents():
 def load_system_prompt():
     with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
         return f.read()
+
+# ЗАГРУЗКА ПЕРЕД ПЕРВЫМ ЗАПРОСОМ GPT
+documents_context = load_documents()
+system_prompt = load_system_prompt()
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"

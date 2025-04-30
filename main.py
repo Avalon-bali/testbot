@@ -13,21 +13,19 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# Google Sheets setup
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name("/etc/secrets/google-credentials.json", scope)
 gsheet = gspread.authorize(creds)
 sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
-# Session state
 sessions = {}
 fsm_state = {}
 lead_data = {}
 fsm_timestamps = {}
 FSM_TIMEOUT = 600
 resume_phrases = ["продолжим", "дальше", "давай продолжим", "ок, да", "запиши", "продолжи", "вернёмся", "да, записывай"]
+question_keywords = ["где", "что", "почему", "как", "когда", "какой", "куда", "сколько", "офис", "находится", "расположение"]
 
-# 📥 Load documents and system prompt
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -44,7 +42,6 @@ def load_system_prompt():
 documents_context = load_documents()
 system_prompt = load_system_prompt()
 
-# Messaging
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
@@ -108,7 +105,8 @@ def telegram_webhook():
         step = fsm_state[user_id]
         answer = text
 
-        if any(answer.lower().startswith(q) for q in ["где", "что", "почему", "как", "когда", "do", "what", "where", "who", "how", "why"]):
+        if any(word in answer.lower() for word in question_keywords):
+            print(f"❗ FSM приостановлен — пользователь задал вопрос: {answer}")
             fsm_state.pop(user_id, None)
             fsm_timestamps.pop(user_id, None)
         else:
@@ -205,7 +203,11 @@ def telegram_webhook():
     elif "будда" in trigger or "buddha" in trigger:
         send_telegram_photo(chat_id, "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/BUDDHA.jpg?raw=true", "🧘 *BUDDHA Club House* — инвестиционный апарт-отель в Чангу.")
     elif "авалон" in trigger or "avalon" in trigger:
-        send_telegram_photo(chat_id, "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg?raw=true", "🏢 *AVALON* — девелоперская компания с украинскими корнями на Бали.")
+        send_telegram_photo(
+            chat_id,
+            "https://github.com/Avalon-bali/testbot/blob/main/AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg?raw=true",
+            "🏢 *AVALON* — девелоперская компания с украинскими корнями на Бали. Мы создаём современные апартаменты, сочетая комфорт и инвестиционную привлекательность."
+        )
 
     sessions[user_id] = (history + [
         {"role": "user", "content": text},

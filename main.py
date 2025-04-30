@@ -22,7 +22,9 @@ sessions = {}
 fsm_state = {}
 lead_data = {}
 fsm_timestamps = {}
+
 FSM_TIMEOUT = 600
+
 resume_phrases = ["продолжим", "дальше", "давай продолжим", "ок, да", "запиши", "продолжи", "вернёмся", "да, записывай"]
 
 def load_documents():
@@ -37,10 +39,6 @@ def load_documents():
 def load_system_prompt():
     with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
         return f.read()
-
-# ЗАГРУЗКА ПЕРЕД ПЕРВЫМ ЗАПРОСОМ GPT
-documents_context = load_documents()
-system_prompt = load_system_prompt()
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -74,7 +72,7 @@ def resume_fsm(user_id, chat_id, lang):
     elif "platform" not in data:
         fsm_state[user_id] = "ask_platform"
         send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet" if lang == "ru" else "📱 Choose platform: WhatsApp / Telegram / Zoom / Google Meet")
-    elif data.get("platform", "").lower() in ["whatsapp", "ватсап", "вотсап"] and "phone" not in data:
+    elif data.get("platform", "").lower() in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"] and "phone" not in data:
         fsm_state[user_id] = "ask_phone"
         send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:" if lang == "ru" else "📞 Please enter your WhatsApp number:")
     else:
@@ -118,7 +116,7 @@ def telegram_webhook():
                     return "ok"
                 elif step == "ask_platform":
                     lead_data[user_id]["platform"] = answer
-                    if "whatsapp" in answer.lower():
+                    if any(w in answer.lower() for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"]):
                         fsm_state[user_id] = "ask_phone"
                         send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:" if lang == "ru" else "📞 Please enter your WhatsApp number:")
                     else:

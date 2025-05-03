@@ -22,6 +22,11 @@ sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet
 sessions = {}
 lead_data = {}
 
+call_request_triggers = [
+    "созвон", "поговорить", "менеджер", "хочу звонок", "можно позвонить",
+    "звонок", "давайте созвонимся", "обсудить", "свяжитесь со мной"
+]
+
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -56,12 +61,18 @@ def get_lang(code):
 
 def extract_lead_data_from_text(text):
     data = {}
-    text_l = text.lower()
+    text_l = text.lower().strip()
 
-    match = re.search(r"меня зовут\s+([а-яa-z\-]+)", text_l)
+    # 1. "меня зовут Артур", "я Саша", "это Катя"
+    match = re.search(r"(меня зовут|я|это|имя)\s+([а-яa-z\-]+)", text_l)
     if match:
-        data["name"] = match.group(1).capitalize()
+        data["name"] = match.group(2).capitalize()
 
+    # 2. Одно короткое слово — возможно имя
+    if len(text.split()) == 1 and text.isalpha() and len(text) <= 15:
+        data["name"] = text.capitalize()
+
+    # Платформа
     if any(w in text_l for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"]):
         data["platform"] = "WhatsApp"
     elif "telegram" in text_l or "телеграм" in text_l:
@@ -71,10 +82,12 @@ def extract_lead_data_from_text(text):
     elif "google meet" in text_l or "гугл мит" in text_l:
         data["platform"] = "Google Meet"
 
+    # Телефон
     phone_match = re.search(r"\+?\d{7,}", text)
     if phone_match:
         data["phone"] = phone_match.group(0)
 
+    # Дата и время
     if any(w in text_l for w in ["завтра", "сегодня", "утром", "вечером", "понедельник", "вторник", "в", ":"]):
         data["datetime"] = text.strip()
 
@@ -94,7 +107,16 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    # Распознаём запрос об офисе
+    # /start
+    if text == "/start":
+        sessions[user_id] = []
+        welcome = "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?" \
+            if lang == "ru" else \
+            "👋 Hello! I’m the AI assistant of Avalon.\nI can help you with our projects, investment options, and life in Bali. How can I assist you?"
+        send_telegram_message(chat_id, welcome)
+        return "ok"
+
+    # Запрос про офис
     if any(w in text.lower() for w in ["офис", "где вы", "где находится", "адрес", "локация"]):
         office_text = (
             "📍 *Наш офис находится на Бали.*\n"
@@ -107,53 +129,51 @@ def telegram_webhook():
         send_telegram_photo(chat_id, "https://files.oaiusercontent.com/file-974iU8fjsshTN7pzChX7my", caption=office_text)
         return "ok"
 
-    # Обработка лидов
-    lead = lead_data.get(user_id, {})
-    new_info = extract_lead_data_from_text(text)
-    lead.update(new_info)
-    lead_data[user_id] = lead
-
-    required_fields = ["name", "platform", "datetime"]
-    if lead.get("platform") == "WhatsApp":
-        required_fields.append("phone")
-
-    if all(lead.get(field) for field in required_fields):
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        sheet.append_row([
-            now_str,
-            lead.get("name", ""),
-            f"@{username}",
-            lead.get("phone", ""),
-            lead.get("datetime", "").split()[0],
-            lead.get("datetime", "").split()[1] if len(lead.get("datetime", "").split()) > 1 else "",
-            lead.get("platform", ""),
-            "",
-            lang_code
-        ])
-        send_telegram_message(chat_id, "✅ Все данные получены и записаны. Менеджер скоро свяжется с вами.")
-        lead_data.pop(user_id, None)
-        return "ok"
-    else:
-        if not lead.get("name"):
-            send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
-        elif not lead.get("platform"):
-            send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
-        elif lead.get("platform") == "WhatsApp" and not lead.get("phone"):
-            send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
-        elif not lead.get("datetime"):
-            send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
+    # Старт заявки, если пользователь сам проявил интерес
+    if user_id not in lead_data and any(w in text.lower() for w in call_request_triggers):
+        lead_data[user_id] = {}
+        send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
         return "ok"
 
-    # /start
-    if text == "/start":
-        sessions[user_id] = []
-        welcome = "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?" \
-            if lang == "ru" else \
-            "👋 Hello! I’m the AI assistant of Avalon.\nI can help you with our projects, investment options, and life in Bali. How can I assist you?"
-        send_telegram_message(chat_id, welcome)
-        return "ok"
+    # Продолжаем сбор лида
+    if user_id in lead_data:
+        lead = lead_data.get(user_id, {})
+        new_info = extract_lead_data_from_text(text)
+        lead.update(new_info)
+        lead_data[user_id] = lead
 
-    # AI ответ
+        required_fields = ["name", "platform", "datetime"]
+        if lead.get("platform") == "WhatsApp":
+            required_fields.append("phone")
+
+        if all(lead.get(field) for field in required_fields):
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            sheet.append_row([
+                now_str,
+                lead.get("name", ""),
+                f"@{username}",
+                lead.get("phone", ""),
+                lead.get("datetime", "").split()[0],
+                lead.get("datetime", "").split()[1] if len(lead.get("datetime", "").split()) > 1 else "",
+                lead.get("platform", ""),
+                "",
+                lang_code
+            ])
+            send_telegram_message(chat_id, "✅ Все данные получены и записаны. Менеджер скоро свяжется с вами.")
+            lead_data.pop(user_id, None)
+            return "ok"
+        else:
+            if not lead.get("name") and "platform" in lead:
+                send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
+            elif not lead.get("platform"):
+                send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
+            elif lead.get("platform") == "WhatsApp" and not lead.get("phone"):
+                send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
+            elif not lead.get("datetime"):
+                send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
+            return "ok"
+
+    # GPT ответ (если не лид)
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},

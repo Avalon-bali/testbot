@@ -105,10 +105,19 @@ def telegram_webhook():
         reply = response.choices[0].message.content.strip()
 
         # если в сообщении есть "avalon", отправляем вместе с фото
-        if "avalon" in text.lower():
-            photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
-            send_telegram_message(chat_id, reply, photo_path=photo_path)
+import random
+
+if "avalon" in text.lower():
+    folder = "AVALON/avalon-photos"
+    try:
+        images = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        if images:
+            selected_image = random.choice(images)
+            send_telegram_message(chat_id, reply, photo_path=selected_image)
             return "ok"
+    except Exception as e:
+        print(f"Ошибка при загрузке изображения Avalon: {e}")
+
 
     except Exception as e:
         reply = "Произошла ошибка при обращении к OpenAI."

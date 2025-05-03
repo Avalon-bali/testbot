@@ -26,22 +26,6 @@ call_request_triggers = [
     "звонок", "давайте созвонимся", "обсудить", "свяжитесь со мной"
 ]
 
-def load_documents():
-    folder = "docs"
-    context_parts = []
-    for filename in os.listdir(folder):
-        if filename.endswith(".txt") and filename != "system_prompt.txt":
-            with open(os.path.join(folder, filename), "r", encoding="utf-8") as f:
-                context_parts.append(f.read())
-    return "\n\n".join(context_parts)
-
-def load_system_prompt():
-    with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
-        return f.read()
-
-documents_context = load_documents()
-system_prompt = load_system_prompt()
-
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
@@ -87,21 +71,6 @@ def extract_lead_data_from_text(text):
 
     return data
 
-def classify_user_input(prompt_text, user_text):
-    try:
-        result = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "Ты помощник. Определи, является ли сообщение пользователя встречным вопросом, а не прямым ответом."},
-                {"role": "user", "content": f"Вопрос от бота:\n{prompt_text}\n\nОтвет пользователя:\n{user_text}\n\nОтветь только: QUESTION или ANSWER"}
-            ]
-        )
-        label = result.choices[0].message.content.strip().upper()
-        return label
-    except Exception as e:
-        print("Ошибка классификации:", e)
-        return "ANSWER"
-
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
@@ -131,40 +100,26 @@ def telegram_webhook():
         lead = lead_data.get(user_id, {})
 
         if not lead.get("name") and "platform" in lead:
-            current_step = "name"
-            prompt_text = "Как к вам можно обращаться?"
+            send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
+            return "ok"
         elif not lead.get("platform"):
-            current_step = "platform"
-            prompt_text = "Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet"
+            send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
+            lead.update(extract_lead_data_from_text(text))
+            lead_data[user_id] = lead
+            return "ok"
         elif lead.get("platform", "").lower() == "whatsapp" and not lead.get("phone"):
-            current_step = "phone"
-            prompt_text = "Напишите номер WhatsApp:"
+            send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
+            lead.update(extract_lead_data_from_text(text))
+            lead_data[user_id] = lead
+            return "ok"
         elif not lead.get("datetime"):
-            current_step = "datetime"
-            prompt_text = "Когда удобно созвониться?"
-        else:
-            current_step = None
-            prompt_text = ""
+            send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
+            lead.update(extract_lead_data_from_text(text))
+            lead_data[user_id] = lead
+            return "ok"
 
-        if current_step:
-            label = classify_user_input(prompt_text, text)
-            if label == "QUESTION":
-                if any(k in text.lower() for k in ["офис", "где", "локация", "адрес"]):
-                    office_text = (
-                        "📍 *Наш офис находится на Бали.*\n"
-                        "Вы можете найти нас по адресу:\n\n"
-                        "*AVALON BALI — Head Office Canggu*\n"
-                        "Jl. Raya Semat, Tibubeneng, Kec. Kuta Utara,\n"
-                        "Kabupaten Badung, Bali 80361\n\n"
-                        "[Открыть в Google Maps](https://maps.app.goo.gl/HjUAZUNvXno8vDSY9)"
-                    )
-                    send_telegram_photo(chat_id, "https://yourdomain.onrender.com/AVALON/office.jpg", caption=office_text)
-                else:
-                    send_telegram_message(chat_id, "Хороший вопрос! С удовольствием отвечу 👇")
-                return "ok"
-
-        new_info = extract_lead_data_from_text(text)
-        lead.update(new_info)
+        # финальное поле
+        lead.update(extract_lead_data_from_text(text))
         lead_data[user_id] = lead
 
         required_fields = ["name", "platform", "datetime"]
@@ -172,64 +127,38 @@ def telegram_webhook():
             required_fields.append("phone")
 
         if all(lead.get(field) for field in required_fields):
+            datetime_raw = lead.get("datetime", "").strip()
+            parts = datetime_raw.split()
+            date_part = parts[0] if len(parts) >= 1 else ""
+            time_part = parts[1] if len(parts) >= 2 else ""
+
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-            sheet.append_row([
-                now_str,
-                lead.get("name", ""),
-                f"@{username}",
-                lead.get("phone", ""),
-                lead.get("datetime", "").split()[0],
-                lead.get("datetime", "").split()[1] if len(lead.get("datetime", "").split()) > 1 else "",
-                lead.get("platform", ""),
-                "",
-                lang_code
-            ])
-            send_telegram_message(chat_id, "✅ Все данные получены и записаны. Менеджер скоро свяжется с вами.")
+            try:
+                sheet.append_row([
+                    now_str,
+                    lead.get("name", ""),
+                    f"@{username}",
+                    lead.get("phone", ""),
+                    date_part,
+                    time_part,
+                    lead.get("platform", ""),
+                    "",
+                    lang_code
+                ])
+                send_telegram_message(chat_id, "✅ Все данные получены и записаны. Менеджер скоро свяжется с вами.")
+            except Exception as e:
+                print("Ошибка записи:", e)
+                send_telegram_message(chat_id, "⚠️ Не удалось сохранить заявку. Попробуйте ещё раз.")
             lead_data.pop(user_id, None)
             return "ok"
-        else:
-            if not lead.get("name") and "platform" in lead:
-                send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
-            elif not lead.get("platform"):
-                send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
-            elif lead.get("platform") == "WhatsApp" and not lead.get("phone"):
-                send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
-            elif not lead.get("datetime"):
-                send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
-            return "ok"
 
-    history = sessions.get(user_id, [])
-    messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\nЕсли пользователь хочет звонок, верни только: [CALL_REQUEST]."},
-        *history[-6:],
-        {"role": "user", "content": text}
-    ]
-
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        )
-        reply = response.choices[0].message.content.strip()
-    except Exception:
-        reply = "⚠️ Ошибка OpenAI." if lang == "ru" else "⚠️ OpenAI error."
-
-    if "CALL_REQUEST" in reply:
-        reply = reply.replace("CALL_REQUEST", "").strip()
-        lead_data[user_id] = {}
-        send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей, чтобы согласовать звонок с менеджером.\n\n👋 Как к вам можно обращаться?")
-        return "ok"
-
-    sessions[user_id] = history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
-    if reply:
-        send_telegram_message(chat_id, reply)
     return "ok"
 
 @app.route("/AVALON/<path:filename>")
 def serve_avalon_static(filename):
     return send_from_directory("AVALON", filename)
 
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
     return "Avalon AI бот работает."
 

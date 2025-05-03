@@ -128,7 +128,7 @@ def telegram_webhook():
 
     # Отправка фото Avalon
     if "avalon" in text:
-        photo_path = "testbot/AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
+        photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
         caption = "*Avalon* – современная недвижимость на Бали."
         send_telegram_message(chat_id, caption, photo_path=photo_path)
         return "ok"

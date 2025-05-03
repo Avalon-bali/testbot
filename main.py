@@ -3,6 +3,7 @@ import openai
 import requests
 import os
 import gspread
+import random
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
@@ -67,13 +68,17 @@ def telegram_webhook():
         send_telegram_message(chat_id, welcome_text)
         return "ok"
 
-    # Обработка запроса на звонок и пошагового диалога
+    # Логика по шагам заполнения данных для звонка
     if user_id not in lead_data:
         if any(w in text.lower() for w in call_request_triggers):
             lead_data[user_id] = {}
             send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\n👋 Как к вам можно обращаться?")
             return "ok"
     else:
+        # Отклонение от сценария
+        if "name" not in lead_data[user_id] and "?" in text:
+            send_telegram_message(chat_id, "📌 Давайте сначала закончим с оформлением звонка, и я обязательно отвечу на ваш вопрос!")
+            return "ok"
         if "name" not in lead_data[user_id]:
             lead_data[user_id]["name"] = text
             send_telegram_message(chat_id, "📞 Что вам удобнее: Zoom или WhatsApp?")
@@ -87,12 +92,18 @@ def telegram_webhook():
                 lead_data[user_id]["platform"] = "WhatsApp"
                 send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
                 return "ok"
+            elif "?" in text:
+                send_telegram_message(chat_id, "📌 Давайте сначала завершим с выбором платформы — Zoom или WhatsApp?")
+                return "ok"
         elif "time" not in lead_data[user_id]:
+            if "?" in text:
+                send_telegram_message(chat_id, "📌 Сначала укажите, когда вам удобно созвониться, и я вернусь к вашему вопросу.")
+                return "ok"
             lead_data[user_id]["time"] = text
-            send_telegram_message(chat_id, "✅ Спасибо! Мы свяжемся с вами в указанное время.")
+            send_telegram_message(chat_id, f"✅ Спасибо! Мы свяжемся с вами в удобное для вас время — *{text}*.")
             return "ok"
 
-    # GPT-запрос с контекстом
+    # GPT-запрос
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
@@ -104,20 +115,17 @@ def telegram_webhook():
         response = openai.chat.completions.create(model="gpt-4o", messages=messages)
         reply = response.choices[0].message.content.strip()
 
-        # если в сообщении есть "avalon", отправляем вместе с фото
-import random
-
-if "avalon" in text.lower():
-    folder = "AVALON/avalon-photos"
-    try:
-        images = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
-        if images:
-            selected_image = random.choice(images)
-            send_telegram_message(chat_id, reply, photo_path=selected_image)
-            return "ok"
-    except Exception as e:
-        print(f"Ошибка при загрузке изображения Avalon: {e}")
-
+        # если пользователь упомянул Avalon — прикрепляем фото
+        if "avalon" in text.lower():
+            folder = "AVALON/avalon-photos"
+            try:
+                images = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+                if images:
+                    selected_image = random.choice(images)
+                    send_telegram_message(chat_id, reply, photo_path=selected_image)
+                    return "ok"
+            except Exception as e:
+                print(f"Ошибка при загрузке изображения Avalon: {e}")
 
     except Exception as e:
         reply = "Произошла ошибка при обращении к OpenAI."

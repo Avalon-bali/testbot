@@ -2,7 +2,6 @@ from flask import Flask, request, send_from_directory
 import openai
 import requests
 import os
-import re
 import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
@@ -42,11 +41,11 @@ def send_telegram_photo(chat_id, photo_url, caption=None):
 
 def detect_lang(text):
     lower = text.lower()
-    if any(word in lower for word in ["hello", "can you", "speak english", "english?", "what is", "tell about", "project"]):
+    if any(word in lower for word in ["hello", "can you", "speak english", "english?", "what is", "tell about"]):
         return "en"
-    elif any(word in lower for word in ["привет", "здравствуйте", "что", "расскажи", "объясни", "расскажите"]):
+    elif any(word in lower for word in ["привет", "здравствуйте", "расскажи", "что", "можно", "проект"]):
         return "ru"
-    elif any(word in lower for word in ["привіт", "доброго", "розкажи", "поясни", "українською"]):
+    elif any(word in lower for word in ["привіт", "доброго", "розкажи", "українською"]):
         return "uk"
     return None
 
@@ -63,9 +62,9 @@ def get_welcome_message(lang):
     if lang == "ru":
         return "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?"
     elif lang == "uk":
-        return "👋 Вітаю! Я — AI асистент відділу продажів Avalon.\nЗ радістю допоможу з питаннями про наші проєкти, інвестиції та життя на Балі. Чим можу бути корисним?"
+        return "👋 Вітаю! Я — AI асистент компанії Avalon.\nЗ радістю допоможу з вашими питаннями про інвестиції та житло на Балі!"
     else:
-        return "👋 Hello! I'm the AI assistant of Avalon.\nI can help you with our projects, investment options, and life in Bali. How can I assist you?"
+        return "👋 Hello! I’m the AI assistant of Avalon.\nI can help you with our projects, investments, and life in Bali. How can I assist you?"
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -84,7 +83,6 @@ def telegram_webhook():
     if text == "/start":
         sessions[user_id] = []
         welcome = get_welcome_message(lang)
-        print(f"[LOG] Приветствие для {user_id} на языке {lang}")
         send_telegram_message(chat_id, welcome)
         return "ok"
 
@@ -102,59 +100,79 @@ def telegram_webhook():
         lead = lead_data.get(user_id, {})
         if "name" not in lead:
             lead["name"] = text
-            msg = {
+            send_telegram_message(chat_id, {
                 "ru": "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet",
                 "uk": "📱 Вкажіть платформу: WhatsApp / Telegram / Zoom / Google Meet",
                 "en": "📱 Choose platform: WhatsApp / Telegram / Zoom / Google Meet"
-            }
-            send_telegram_message(chat_id, msg.get(lang, msg["en"]))
+            }.get(lang))
         elif "platform" not in lead:
             lead["platform"] = text
             if text.lower() == "whatsapp":
-                msg = {
+                send_telegram_message(chat_id, {
                     "ru": "📞 Напишите номер WhatsApp:",
                     "uk": "📞 Напишіть номер WhatsApp:",
                     "en": "📞 Please enter your WhatsApp number:"
-                }
-                send_telegram_message(chat_id, msg.get(lang, msg["en"]))
+                }.get(lang))
             else:
-                msg = {
+                send_telegram_message(chat_id, {
                     "ru": "🗓 Когда удобно созвониться?",
                     "uk": "🗓 Коли зручно зв'язатися?",
                     "en": "🗓 When would you like to have a call?"
-                }
-                send_telegram_message(chat_id, msg.get(lang, msg["en"]))
+                }.get(lang))
         elif lead.get("platform", "").lower() == "whatsapp" and "phone" not in lead:
             lead["phone"] = text
-            msg = {
+            send_telegram_message(chat_id, {
                 "ru": "🗓 Когда удобно созвониться?",
                 "uk": "🗓 Коли зручно зв'язатися?",
                 "en": "🗓 When would you like to have a call?"
-            }
-            send_telegram_message(chat_id, msg.get(lang, msg["en"]))
+            }.get(lang))
         else:
             lead["datetime"] = text
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-            sheet.append_row([
-                now_str,
-                lead.get("name", ""),
-                f"@{username}",
-                lead.get("phone", ""),
-                text.split()[0] if len(text.split()) > 0 else "",
-                text.split()[1] if len(text.split()) > 1 else "",
-                lead.get("platform", ""),
-                "",
-                lang_code
-            ])
-            msg = {
-                "ru": "✅ Все данные записаны. Менеджер свяжется с вами.",
-                "uk": "✅ Дані збережено. Менеджер зв'яжеться з вами.",
-                "en": "✅ Details saved. Manager will contact you soon."
-            }
-            send_telegram_message(chat_id, msg.get(lang, msg["en"]))
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                sheet.append_row([
+                    now_str,
+                    lead.get("name", ""),
+                    f"@{username}",
+                    lead.get("phone", ""),
+                    text.split()[0] if len(text.split()) > 0 else "",
+                    text.split()[1] if len(text.split()) > 1 else "",
+                    lead.get("platform", ""),
+                    "",
+                    lang_code
+                ])
+                print(f"[LEAD] ✅ Записан лид: {lead}")
+                send_telegram_message(chat_id, {
+                    "ru": "✅ Все данные записаны. Менеджер свяжется с вами.",
+                    "uk": "✅ Дані збережено. Менеджер зв'яжеться з вами.",
+                    "en": "✅ Details saved. Manager will contact you soon."
+                }.get(lang))
+            except Exception as e:
+                print("❌ Ошибка записи в таблицу:", e)
+                send_telegram_message(chat_id, "⚠️ Не удалось сохранить заявку. Попробуйте ещё раз.")
             lead_data.pop(user_id, None)
         return "ok"
 
+    # GPT-ответ (если не сбор)
+    history = sessions.get(user_id, [])
+    messages = [
+        {"role": "system", "content": f"You are a helpful assistant at Avalon. Respond in {lang.upper()}."},
+        *history[-6:],
+        {"role": "user", "content": text}
+    ]
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
+        reply = response.choices[0].message.content.strip()
+    except Exception as e:
+        print("❌ GPT error:", e)
+        reply = "⚠️ Произошла ошибка. Попробуйте позже." if lang == "ru" else "⚠️ Something went wrong. Please try again."
+
+    sessions[user_id] = history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
+    send_telegram_message(chat_id, reply)
     return "ok"
 
 @app.route("/AVALON/<path:filename>")

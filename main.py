@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, send_from_directory
 import openai
 import requests
 import os
@@ -21,24 +21,39 @@ sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet
 sessions = {}
 lead_data = {}
 
-def load_documents():
-    folder = "docs"
-    context_parts = []
-    for filename in os.listdir(folder):
-        if filename.endswith(".txt") and filename != "system_prompt.txt":
-            with open(os.path.join(folder, filename), "r", encoding="utf-8") as f:
-                context_parts.append(f.read())
-    return "\n\n".join(context_parts)
+call_request_triggers = [
+    "созвон", "поговорить", "менеджер", "хочу звонок", "можно позвонить",
+    "звонок", "давайте созвонимся", "обсудить", "свяжитесь со мной"
+]
 
-documents_context = load_documents()
+system_prompt_template = {
+    "ru": (
+        "Ты — AI Assistant отдела продаж компании Avalon. "
+        "Ты можешь отвечать только на темы: проекты Avalon, OM, BUDDHA, TAO, инвестиции, недвижимость на Бали. "
+        "Если вопрос не по теме — мягко откажись. Отвечай как опытный менеджер. "
+        "📥 Ты всегда используешь информацию из текстов в `docs/*.txt`. "
+        "Обращай внимание на ссылки в этих текстах. Если пользователь спрашивает про PDF, презентацию или ссылку — вставь её, если она есть."
+    ),
+    "uk": (
+        "Ти — AI асистент відділу продажів компанії Avalon. "
+        "Ти можеш відповідати лише на теми: проєкти Avalon, OM, BUDDHA, TAO, інвестиції, нерухомість на Балі. "
+        "Якщо питання не по темі — ввічливо відмов. Відповідай як досвідчений менеджер. "
+        "📥 Завжди використовуй інформацію з текстів у `docs/*.txt`. "
+        "Звертай увагу на посилання в цих текстах. Якщо користувач питає про PDF, презентацію чи посилання — встав його, якщо воно є."
+    ),
+    "en": (
+        "You are the AI Assistant of the Avalon sales team. "
+        "You may only answer questions related to: Avalon projects, OM, BUDDHA, TAO, investments, real estate in Bali. "
+        "If the question is off-topic — politely decline. Answer like a professional sales manager. "
+        "📥 Always use content from the `docs/*.txt` files. "
+        "Pay attention to links in those texts. If the user asks for a PDF, brochure or link — include it if available."
+    )
+}
 
-system_prompt = (
-    "Ты — AI Assistant отдела продаж компании Avalon. "
-    "Ты можешь отвечать только на темы: проекты Avalon, OM, BUDDHA, TAO, инвестиции, недвижимость на Бали. "
-    "Если вопрос не по теме — мягко откажись. Отвечай как опытный менеджер. "
-    "📥 Ты всегда используешь информацию из текстов в `docs/*.txt`. "
-    "Обращай внимание на ссылки в этих текстах. Если пользователь спрашивает про PDF, презентацию или ссылку — вставь её, если она есть."
-)
+lang = lang_code if lang_code in ["ru", "uk"] else "en"
+system_prompt = system_prompt_template.get(lang, system_prompt_template["en"])
+Ты — AI Assistant отдела продаж компании Avalon. Ты можешь отвечать только на темы: проекты Avalon, OM, BUDDHA, TAO, инвестиции, недвижимость на Бали. Если вопрос не по теме — мягко откажись. Отвечай как опытный менеджер.
+"""
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -50,7 +65,7 @@ def classify_user_input(prompt_text, user_text):
         result = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "Ответь только 'ANSWER' если пользователь отвечает на вопрос, или 'QUESTION' если задаёт встречный вопрос."},
+                {"role": "system", "content": "Ты помощник. Ответь только 'ANSWER' если пользователь отвечает на вопрос, или 'QUESTION' если задаёт встречный вопрос."},
                 {"role": "user", "content": f"Вопрос от бота: {prompt_text}\nОтвет пользователя: {user_text}"}
             ]
         )
@@ -60,28 +75,19 @@ def classify_user_input(prompt_text, user_text):
 
 def extract_lead_data(text):
     data = {}
-    t = text.lower().strip()
-
-    # Имя (если не похоже на платформу)
-    if len(text.split()) == 1 and text.isalpha() and not any(w in t for w in ["ватсап", "вотсап", "телега", "тг", "telegram", "zoom", "зум", "google", "мит"]):
+    text = text.strip()
+    if len(text.split()) == 1 and text.isalpha():
         data["name"] = text.capitalize()
-
-    # Платформы
-    if any(w in t for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вацап", "вотцап"]):
+    if any(w in text.lower() for w in ["whatsapp", "ватсап", "вотсап"]):
         data["platform"] = "WhatsApp"
-    elif any(w in t for w in ["telegram", "телеграм", "телега", "тг", "tg"]):
+    elif "telegram" in text.lower():
         data["platform"] = "Telegram"
-    elif any(w in t for w in ["zoom", "зум", "зуум", "зумм"]):
+    elif "zoom" in text.lower():
         data["platform"] = "Zoom"
-    elif any(w in t for w in ["google meet", "гугл мит", "гуглміт", "мит", "meet"]):
-        data["platform"] = "Google Meet"
-
-    if re.search(r"\+?\d{7,}", t):
+    if re.search(r"\+?\d{7,}", text):
         data["phone"] = text
-
-    if any(w in t for w in ["сегодня", "завтра", "понедельник", "вторник", "в ", "в", "утром", "вечером", "днем", "13", "14", "15", "16", "17", "18", ":", "вечер", "утро"]):
+    if any(w in text.lower() for w in ["сегодня", "завтра", "вечером", "утром"]):
         data["datetime"] = text
-
     return data
 
 def get_step(lead):
@@ -105,11 +111,10 @@ def telegram_webhook():
     username = message.get("from", {}).get("username", "")
 
     if text == "/start":
-        sessions[user_id] = []
         send_telegram_message(chat_id, "👋 Здравствуйте! Я — AI ассистент компании Avalon. Чем могу быть полезен?")
         return "ok"
 
-    if user_id not in lead_data and any(w in text.lower() for w in ["созвон", "менеджер", "звонок", "встретиться"]):
+    if user_id not in lead_data and any(w in text.lower() for w in call_request_triggers):
         lead_data[user_id] = {}
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\n👋 Как к вам можно обращаться?")
         return "ok"
@@ -120,49 +125,73 @@ def telegram_webhook():
         if step:
             label = classify_user_input(prompt, text)
             if label == "QUESTION":
-                send_telegram_message(chat_id, "❓ Сейчас уточним детали звонка. После этого с радостью отвечу!")
+                send_telegram_message(chat_id, "❓ Сейчас уточним детали звонка. После этого я с радостью отвечу на другие вопросы!")
                 return "ok"
             lead.update(extract_lead_data(text))
             lead_data[user_id] = lead
             step, prompt = get_step(lead)
             if not step:
                 now = datetime.now().strftime("%Y-%m-%d %H:%M")
-                dt_raw = lead.get("datetime", "").strip().lower()
+                dt = lead.get("datetime", "").split()
+                date_part = dt[0] if len(dt) > 0 else ""
+                time_part = dt[1] if len(dt) > 1 else ""
+                datetime_raw = lead.get("datetime", "").strip().lower()
+date_part = ""
+time_part = ""
 
-                wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform") == "WhatsApp" and lead.get("phone") else ""
+for word in datetime_raw.split():
+    if word in ["сегодня", "завтра", "понедельник", "вторник", "среда", "четверг", "пятница"]:
+        date_part = word
+    elif word in ["утром", "вечером", "днем", "вечер", "утро", "после обеда"]:
+        time_part = word
 
-                # определение проекта
-                text_lower = text.lower()
-                project = ""
-                if any(w in text_lower for w in ["ом", "om"]):
-                    project = "OM"
-                elif any(w in text_lower for w in ["buddha", "будда"]):
-                    project = "BUDDHA"
-                elif any(w in text_lower for w in ["tao", "тао", "тау"]):
-                    project = "TAO"
+wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform") == "WhatsApp" and lead.get("phone") else ""
+project = ""
+text_lower = text.lower()
+if any(w in text_lower for w in ["ом", "om"]):
+    project = "OM"
+elif any(w in text_lower for w in ["buddha", "будда"]):
+    project = "BUDDHA"
+elif any(w in text_lower for w in ["tao", "тао", "тау"]):
+    project = "TAO"  # Пока не заполняется
 
-                try:
-                    sheet.append_row([
-                        now,
-                        lead.get("name", ""),
-                        f"@{username}",
-                        wa_url,
-                        lead.get("datetime", ""),
-                        project,
-                        "ru"
-                    ])
-                except Exception as e:
-                    print("❌ Ошибка Google Sheet:", e)
+now = datetime.now().strftime("%Y-%m-%d %H:%M")
+t = text.lower()
+
+platform = lead.get("platform", "")
+wa_url = f"https://wa.me/{lead.get('phone')}" if platform == "WhatsApp" and lead.get("phone") else ""
+datetime_value = lead.get("datetime", "")
+
+project = ""
+if "ом" in t or "om" in t:
+    project = "OM"
+elif "будда" in t or "buddha" in t:
+    project = "BUDDHA"
+elif "тао" in t or "tao" in t or "тау" in t:
+    project = "TAO"
+
+sheet.append_row([
+    now,
+    lead.get("name", ""),
+    f"@{username}",
+    platform,
+    wa_url,
+    datetime_value,
+    project,
+    "ru"
+])
                 send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
                 lead_data.pop(user_id, None)
                 return "ok"
             send_telegram_message(chat_id, prompt)
             return "ok"
 
-    # GPT fallback
+    # GPT fallback if no form is active
     history = sessions.get(user_id, [])
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
+        {"role": "system", "content": f"{system_prompt}
+
+{documents_context}"},
         *history[-6:],
         {"role": "user", "content": text}
     ]
@@ -173,7 +202,6 @@ def telegram_webhook():
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
-        print("GPT error:", e)
         reply = "⚠️ Ошибка. Попробуйте позже."
 
     sessions[user_id] = history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
@@ -182,7 +210,7 @@ def telegram_webhook():
 
 @app.route("/")
 def home():
-    return "Avalon AI работает."
+    return "Avalon AI бот работает."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

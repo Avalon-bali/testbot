@@ -126,13 +126,18 @@ def telegram_webhook():
             lead_data.pop(user_id, None)
             return "ok"
 
+    # Отправка фото Avalon
     if "avalon" in text:
         photo_path = "testbot/AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
         caption = "*Avalon* – современная недвижимость на Бали."
         send_telegram_message(chat_id, caption, photo_path=photo_path)
         return "ok"
 
-    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text}]
+    # GPT fallback
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": text}
+    ]
     response = openai.chat.completions.create(model="gpt-4o", messages=messages)
     reply = response.choices[0].message.content.strip()
 

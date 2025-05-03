@@ -4,8 +4,11 @@ import requests
 import os
 import re
 import gspread
+import logging
+import time
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
+from gspread.exceptions import APIError
 
 app = Flask(__name__)
 
@@ -16,7 +19,24 @@ openai.api_key = OPENAI_API_KEY
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name("/etc/secrets/google-credentials.json", scope)
 gsheet = gspread.authorize(creds)
-sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
+
+logging.basicConfig(level=logging.INFO)
+
+def connect_to_sheet(sheet_key, retries=5, delay=10):
+    for attempt in range(1, retries + 1):
+        try:
+            sheet = gsheet.open_by_key(sheet_key).sheet1
+            logging.info(f"Connected to sheet on attempt {attempt}")
+            return sheet
+        except APIError as e:
+            logging.error(f"Attempt {attempt}/{retries} - Error connecting to Google Sheets: {e}")
+            if attempt < retries:
+                time.sleep(delay)
+            else:
+                logging.critical("Failed to connect to Google Sheets after multiple attempts")
+                raise e
+
+sheet = connect_to_sheet("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4")
 
 sessions = {}
 lead_data = {}
@@ -26,77 +46,38 @@ call_request_triggers = [
     "звонок", "давайте созвонимся", "обсудить", "свяжитесь со мной"
 ]
 
-system_prompt_template = {
-    "ru": (
-        "Ты - AI Assistant отдела продаж компании Avalon. "
-        "Ты можешь отвечать только на темы: проекты Avalon, OM, BUDDHA, TAO, инвестиции, недвижимость на Бали. "
-        "Если вопрос не по теме - мягко откажись. Отвечай как опытный менеджер. "
-        "📥 Ты всегда используешь информацию из текстов в docs/*.txt. "
-        "Обращай внимание на ссылки в этих текстах. Если пользователь спрашивает про PDF, презентацию или ссылку - вставь её, если она есть."
-    ),
-    "uk": (
-        "Ти - AI асистент відділу продажів компанії Avalon. "
-        "Ти можеш відповідати лише на теми: проєкти Avalon, OM, BUDDHA, TAO, інвестиції, нерухомість на Балі. "
-        "Якщо питання не по темі - ввічливо відмов. Відповідай як досвідчений менеджер. "
-        "📥 Завжди використовуй інформацію з текстів у docs/*.txt. "
-        "Звертай увагу на посилання в цих текстах. Якщо користувач питає про PDF, презентацію чи посилання - встав його, якщо воно є."
-    ),
-    "en": (
-        "You are the AI Assistant of the Avalon sales team. "
-        "You may only answer questions related to: Avalon projects, OM, BUDDHA, TAO, investments, real estate in Bali. "
-        "If the question is off-topic - politely decline. Answer like a professional sales manager. "
-        "📥 Always use content from the docs/*.txt files. "
-        "Pay attention to links in those texts. If the user asks for a PDF, brochure or link - include it if available."
-    )
-}
+system_prompt = (
+    "You are the AI Assistant of the Avalon sales team. "
+    "You may only answer questions related to: Avalon projects, OM, BUDDHA, TAO, investments, real estate in Bali. "
+    "If the question is off-topic - politely decline. Answer like a professional sales manager. "
+    "Always use content from the docs/*.txt files. "
+    "Pay attention to links in those texts. If the user asks for a PDF, brochure or link - include it if available."
+)
 
-lang_code = "en"
-system_prompt = system_prompt_template.get(lang_code, system_prompt_template["en"])
+def escape_markdown(text):
+    escape_chars = r'_*[\]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
-def send_telegram_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-    requests.post(url, json=payload)
-
-def classify_user_input(prompt_text, user_text):
-    try:
-        result = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "Ты помощник. Ответь только 'ANSWER' если пользователь отвечает на вопрос, или 'QUESTION' если задаёт встречный вопрос."},
-                {"role": "user", "content": f"Вопрос от бота: {prompt_text}\nОтвет пользователя: {user_text}"}
-            ]
-        )
-        return result.choices[0].message.content.strip().upper()
-    except:
-        return "ANSWER"
-
-def extract_lead_data(text):
-    data = {}
-    if len(text.split()) == 1 and text.isalpha():
-        data["name"] = text.capitalize()
-    if any(w in text.lower() for w in ["whatsapp", "ватсап", "вотсап"]):
-        data["platform"] = "WhatsApp"
-    elif "telegram" in text.lower():
-        data["platform"] = "Telegram"
-    elif "zoom" in text.lower():
-        data["platform"] = "Zoom"
-    if re.search(r"\+?\d{7,}", text):
-        data["phone"] = text
-    if any(w in text.lower() for w in ["сегодня", "завтра", "вечером", "утром"]):
-        data["datetime"] = text
-    return data
-
-def get_step(lead):
-    if "name" not in lead:
-        return "name", "👋 Как к вам можно обращаться?"
-    if "platform" not in lead:
-        return "platform", "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet"
-    if lead.get("platform", "").lower() == "whatsapp" and "phone" not in lead:
-        return "phone", "📞 Напишите номер WhatsApp:"
-    if "datetime" not in lead:
-        return "datetime", "🗓 Когда удобно созвониться?"
-    return None, None
+def send_telegram_message(chat_id, text, photo_path=None):
+    escaped_text = escape_markdown(text)
+    if photo_path:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+        with open(photo_path, 'rb') as photo:
+            payload = {
+                'chat_id': chat_id,
+                'caption': escaped_text,
+                'parse_mode': 'MarkdownV2'
+            }
+            files = {'photo': photo}
+            requests.post(url, data=payload, files=files)
+    else:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": escaped_text,
+            "parse_mode": "MarkdownV2"
+        }
+        requests.post(url, json=payload)
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -104,41 +85,52 @@ def telegram_webhook():
     message = data.get("message", {})
     chat_id = message.get("chat", {}).get("id")
     user_id = message.get("from", {}).get("id")
-    text = message.get("text", "").strip()
+    text = message.get("text", "").strip().lower()
     username = message.get("from", {}).get("username", "")
 
     if text == "/start":
         send_telegram_message(chat_id, "👋 Здравствуйте! Я — AI ассистент компании Avalon. Чем могу быть полезен?")
         return "ok"
 
-    if user_id not in lead_data and any(w in text.lower() for w in call_request_triggers):
+    if user_id not in lead_data and any(w in text for w in call_request_triggers):
         lead_data[user_id] = {}
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\n👋 Как к вам можно обращаться?")
         return "ok"
 
     if user_id in lead_data:
         lead = lead_data[user_id]
-        step, prompt = get_step(lead)
-        if step:
-            label = classify_user_input(prompt, text)
-            if label == "QUESTION":
-                send_telegram_message(chat_id, "❓ Сейчас уточним детали звонка. После этого я отвечу на другие вопросы!")
-                return "ok"
-            lead.update(extract_lead_data(text))
-            step, prompt = get_step(lead)
-            if not step:
-                now = datetime.now().strftime("%Y-%m-%d %H:%M")
-                platform = lead.get("platform", "")
-                wa_url = f"https://wa.me/{lead.get('phone')}" if platform == "WhatsApp" and lead.get("phone") else ""
-                sheet.append_row([
-                    now, lead.get("name", ""), f"@{username}", platform,
-                    wa_url, lead.get("datetime", ""), "", "ru"
-                ])
-                send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
-                lead_data.pop(user_id, None)
-                return "ok"
-            send_telegram_message(chat_id, prompt)
+        if "name" not in lead:
+            lead["name"] = text.capitalize()
+            send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
             return "ok"
+        elif "platform" not in lead:
+            lead["platform"] = text.capitalize()
+            if lead["platform"].lower() == "whatsapp":
+                send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
+            else:
+                send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
+            return "ok"
+        elif lead.get("platform", "").lower() == "whatsapp" and "phone" not in lead:
+            lead["phone"] = text
+            send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
+            return "ok"
+        elif "datetime" not in lead:
+            lead["datetime"] = text
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform") == "WhatsApp" else ""
+            sheet.append_row([
+                now, lead.get("name"), f"@{username}", lead.get("platform"),
+                wa_url, lead.get("datetime"), "", "ru"
+            ])
+            send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
+            lead_data.pop(user_id, None)
+            return "ok"
+
+    if "avalon" in text:
+        photo_path = "testbot/AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
+        caption = "*Avalon* – современная недвижимость на Бали."
+        send_telegram_message(chat_id, caption, photo_path=photo_path)
+        return "ok"
 
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text}]
     response = openai.chat.completions.create(model="gpt-4o", messages=messages)

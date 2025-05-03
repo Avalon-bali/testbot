@@ -87,6 +87,21 @@ def extract_lead_data_from_text(text):
 
     return data
 
+def classify_user_input(prompt_text, user_text):
+    try:
+        result = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "Ты помощник. Определи, является ли сообщение пользователя встречным вопросом, а не прямым ответом."},
+                {"role": "user", "content": f"Вопрос от бота:\n{prompt_text}\n\nОтвет пользователя:\n{user_text}\n\nОтветь только: QUESTION или ANSWER"}
+            ]
+        )
+        label = result.choices[0].message.content.strip().upper()
+        return label
+    except Exception as e:
+        print("Ошибка классификации:", e)
+        return "ANSWER"
+
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
@@ -103,47 +118,41 @@ def telegram_webhook():
 
     if text == "/start":
         sessions[user_id] = []
-        welcome = "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?" \
-            if lang == "ru" else \
-            "👋 Hello! I’m the AI assistant of Avalon.\nI can help you with our projects, investment options, and life in Bali. How can I assist you?"
+        welcome = "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?"
         send_telegram_message(chat_id, welcome)
         return "ok"
 
-    # универсальный ответ на вопросы об офисе
-    if any(w in text.lower() for w in ["офис", "где вы", "где находится", "адрес", "локация", "находитесь"]):
-        office_text = (
-            "📍 *Наш офис находится на Бали.*\n"
-            "Вы можете найти нас по адресу:\n\n"
-            "*AVALON BALI — Head Office Canggu*\n"
-            "Jl. Raya Semat, Tibubeneng, Kec. Kuta Utara,\n"
-            "Kabupaten Badung, Bali 80361\n\n"
-            "[Открыть в Google Maps](https://maps.app.goo.gl/HjUAZUNvXno8vDSY9)"
-        )
-        send_telegram_photo(chat_id, "https://yourdomain.onrender.com/AVALON/office.jpg", caption=office_text)
-        return "ok"
-
-    # начало опроса
     if user_id not in lead_data and any(w in text.lower() for w in call_request_triggers):
         lead_data[user_id] = {}
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей, чтобы согласовать звонок с менеджером.\n\n👋 Как к вам можно обращаться?")
         return "ok"
 
-    # продолжение сбора
     if user_id in lead_data:
-        # приоритетно отвечаем на вопрос, а не продолжаем опрос
-        if any(w in text.lower() for w in ["офис", "где вы", "где находится", "адрес", "локация", "находитесь"]):
-            office_text = (
-                "📍 *Наш офис находится на Бали.*\n"
-                "Вы можете найти нас по адресу:\n\n"
-                "*AVALON BALI — Head Office Canggu*\n"
-                "Jl. Raya Semat, Tibubeneng, Kec. Kuta Utara,\n"
-                "Kabupaten Badung, Bali 80361\n\n"
-                "[Открыть в Google Maps](https://maps.app.goo.gl/HjUAZUNvXno8vDSY9)"
-            )
-            send_telegram_photo(chat_id, "https://yourdomain.onrender.com/AVALON/office.jpg", caption=office_text)
-            return "ok"
-
         lead = lead_data.get(user_id, {})
+
+        # определяем текущий шаг
+        if not lead.get("name") and "platform" in lead:
+            current_step = "name"
+            prompt_text = "Как к вам можно обращаться?"
+        elif not lead.get("platform"):
+            current_step = "platform"
+            prompt_text = "Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet"
+        elif lead.get("platform", "").lower() == "whatsapp" and not lead.get("phone"):
+            current_step = "phone"
+            prompt_text = "Напишите номер WhatsApp:"
+        elif not lead.get("datetime"):
+            current_step = "datetime"
+            prompt_text = "Когда удобно созвониться?"
+        else:
+            current_step = None
+            prompt_text = ""
+
+        # проверка: это ответ или встречный вопрос?
+        if current_step:
+            label = classify_user_input(prompt_text, text)
+            if label == "QUESTION":
+                return "ok"
+
         new_info = extract_lead_data_from_text(text)
         lead.update(new_info)
         lead_data[user_id] = lead
@@ -179,7 +188,7 @@ def telegram_webhook():
                 send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
             return "ok"
 
-    # GPT-ответ
+    # GPT-ответ (если не сбор)
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\nЕсли пользователь хочет звонок, верни только: [CALL_REQUEST]."},

@@ -62,9 +62,11 @@ def extract_lead_data(text):
     data = {}
     t = text.lower().strip()
 
-    if len(text.split()) == 1 and text.isalpha():
+    # Имя (если не похоже на платформу)
+    if len(text.split()) == 1 and text.isalpha() and not any(w in t for w in ["ватсап", "вотсап", "телега", "тг", "telegram", "zoom", "зум", "google", "мит"]):
         data["name"] = text.capitalize()
 
+    # Платформы
     if any(w in t for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вацап", "вотцап"]):
         data["platform"] = "WhatsApp"
     elif any(w in t for w in ["telegram", "телеграм", "телега", "тг", "tg"]):
@@ -77,7 +79,7 @@ def extract_lead_data(text):
     if re.search(r"\+?\d{7,}", t):
         data["phone"] = text
 
-    if any(w in t for w in ["сегодня", "завтра", "вечером", "утром", "понедельник", "вторник", ":"]):
+    if any(w in t for w in ["сегодня", "завтра", "понедельник", "вторник", "в ", "в", "утром", "вечером", "днем", "13", "14", "15", "16", "17", "18", ":", "вечер", "утро"]):
         data["datetime"] = text
 
     return data
@@ -126,23 +128,26 @@ def telegram_webhook():
             if not step:
                 now = datetime.now().strftime("%Y-%m-%d %H:%M")
                 dt_raw = lead.get("datetime", "").strip().lower()
-                date_part = ""
-                time_part = ""
-                for word in dt_raw.split():
-                    if word in ["сегодня", "завтра", "понедельник", "вторник", "среда", "четверг", "пятница"]:
-                        date_part = word
-                    elif word in ["утром", "вечером", "днем", "вечер", "утро", "после обеда"]:
-                        time_part = word
+
                 wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform") == "WhatsApp" and lead.get("phone") else ""
-                project = ""  # можно позже распознать по тексту
+
+                # определение проекта
+                text_lower = text.lower()
+                project = ""
+                if any(w in text_lower for w in ["ом", "om"]):
+                    project = "OM"
+                elif any(w in text_lower for w in ["buddha", "будда"]):
+                    project = "BUDDHA"
+                elif any(w in text_lower for w in ["tao", "тао", "тау"]):
+                    project = "TAO"
+
                 try:
                     sheet.append_row([
                         now,
                         lead.get("name", ""),
                         f"@{username}",
                         wa_url,
-                        date_part,
-                        time_part,
+                        lead.get("datetime", ""),
                         project,
                         "ru"
                     ])

@@ -21,7 +21,7 @@ sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet
 sessions = {}
 lead_data = {}
 
-# 📥 Загрузка документов
+# загрузка контекста из docs
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -61,19 +61,28 @@ def classify_user_input(prompt_text, user_text):
 
 def extract_lead_data(text):
     data = {}
-    text = text.strip()
+    t = text.lower().strip()
+
+    # Имя (одно слово)
     if len(text.split()) == 1 and text.isalpha():
         data["name"] = text.capitalize()
-    if any(w in text.lower() for w in ["whatsapp", "ватсап", "вотсап"]):
+
+    # Платформы
+    if any(w in t for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вацап", "вотцап"]):
         data["platform"] = "WhatsApp"
-    elif "telegram" in text.lower():
+    elif any(w in t for w in ["telegram", "телеграм", "телега", "тг", "tg"]):
         data["platform"] = "Telegram"
-    elif "zoom" in text.lower():
+    elif any(w in t for w in ["zoom", "зум", "зуум", "зумм"]):
         data["platform"] = "Zoom"
-    if re.search(r"\+?\d{7,}", text):
+    elif any(w in t for w in ["google meet", "гугл мит", "гуглміт", "мит", "meet"]):
+        data["platform"] = "Google Meet"
+
+    if re.search(r"\+?\d{7,}", t):
         data["phone"] = text
-    if any(w in text.lower() for w in ["сегодня", "завтра", "вечером", "утром", ":"]):
+
+    if any(w in t for w in ["сегодня", "завтра", "вечером", "утром", "понедельник", "вторник", ":"]):
         data["datetime"] = text
+
     return data
 
 def get_step(lead):

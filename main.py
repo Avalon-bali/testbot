@@ -67,7 +67,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, welcome_text)
         return "ok"
 
-    # Обработка запроса на звонок и диалога по шагам
+    # Обработка запроса на звонок и пошагового диалога
     if user_id not in lead_data:
         if any(w in text.lower() for w in call_request_triggers):
             lead_data[user_id] = {}
@@ -76,18 +76,21 @@ def telegram_webhook():
     else:
         if "name" not in lead_data[user_id]:
             lead_data[user_id]["name"] = text
-            send_telegram_message(chat_id, "📅 Когда вам удобно созвониться? (например: сегодня вечером или завтра в 10:00)")
+            send_telegram_message(chat_id, "📞 Что вам удобнее: Zoom или WhatsApp?")
             return "ok"
+        elif "platform" not in lead_data[user_id]:
+            if "zoom" in text.lower():
+                lead_data[user_id]["platform"] = "Zoom"
+                send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
+                return "ok"
+            elif "whatsapp" in text.lower() or "вотсап" in text.lower():
+                lead_data[user_id]["platform"] = "WhatsApp"
+                send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
+                return "ok"
         elif "time" not in lead_data[user_id]:
             lead_data[user_id]["time"] = text
             send_telegram_message(chat_id, "✅ Спасибо! Мы свяжемся с вами в указанное время.")
             return "ok"
-
-    # Отправка картинки Avalon, если упоминается
-    if "avalon" in text.lower():
-        photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
-        send_telegram_message(chat_id, "*Avalon* — современная недвижимость на Бали.", photo_path=photo_path)
-        return "ok"
 
     # GPT-запрос с контекстом
     history = sessions.get(user_id, [])
@@ -100,6 +103,13 @@ def telegram_webhook():
     try:
         response = openai.chat.completions.create(model="gpt-4o", messages=messages)
         reply = response.choices[0].message.content.strip()
+
+        # если в сообщении есть "avalon", отправляем вместе с фото
+        if "avalon" in text.lower():
+            photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
+            send_telegram_message(chat_id, reply, photo_path=photo_path)
+            return "ok"
+
     except Exception as e:
         reply = "Произошла ошибка при обращении к OpenAI."
 

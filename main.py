@@ -1,8 +1,7 @@
-from flask import Flask, request
+from flask import Flask, request, send_from_directory
 import openai
 import requests
 import os
-import time
 import re
 import gspread
 from datetime import datetime
@@ -63,16 +62,13 @@ def extract_lead_data_from_text(text):
     data = {}
     text_l = text.lower().strip()
 
-    # 1. "меня зовут Артур", "я Саша", "это Катя"
     match = re.search(r"(меня зовут|я|это|имя)\s+([а-яa-z\-]+)", text_l)
     if match:
         data["name"] = match.group(2).capitalize()
 
-    # 2. Одно короткое слово — возможно имя
     if len(text.split()) == 1 and text.isalpha() and len(text) <= 15:
         data["name"] = text.capitalize()
 
-    # Платформа
     if any(w in text_l for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"]):
         data["platform"] = "WhatsApp"
     elif "telegram" in text_l or "телеграм" in text_l:
@@ -82,12 +78,10 @@ def extract_lead_data_from_text(text):
     elif "google meet" in text_l or "гугл мит" in text_l:
         data["platform"] = "Google Meet"
 
-    # Телефон
     phone_match = re.search(r"\+?\d{7,}", text)
     if phone_match:
         data["phone"] = phone_match.group(0)
 
-    # Дата и время
     if any(w in text_l for w in ["завтра", "сегодня", "утром", "вечером", "понедельник", "вторник", "в", ":"]):
         data["datetime"] = text.strip()
 
@@ -107,7 +101,6 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    # /start
     if text == "/start":
         sessions[user_id] = []
         welcome = "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?" \
@@ -116,7 +109,6 @@ def telegram_webhook():
         send_telegram_message(chat_id, welcome)
         return "ok"
 
-    # Запрос про офис
     if any(w in text.lower() for w in ["офис", "где вы", "где находится", "адрес", "локация"]):
         office_text = (
             "📍 *Наш офис находится на Бали.*\n"
@@ -126,16 +118,14 @@ def telegram_webhook():
             "Kabupaten Badung, Bali 80361\n\n"
             "[Открыть в Google Maps](https://maps.app.goo.gl/HjUAZUNvXno8vDSY9)"
         )
-        send_telegram_photo(chat_id, "https://files.oaiusercontent.com/file-974iU8fjsshTN7pzChX7my", caption=office_text)
+        send_telegram_photo(chat_id, "https://yourdomain.onrender.com/AVALON/office.jpg", caption=office_text)
         return "ok"
 
-    # Старт заявки, если пользователь сам проявил интерес
     if user_id not in lead_data and any(w in text.lower() for w in call_request_triggers):
         lead_data[user_id] = {}
         send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
         return "ok"
 
-    # Продолжаем сбор лида
     if user_id in lead_data:
         lead = lead_data.get(user_id, {})
         new_info = extract_lead_data_from_text(text)
@@ -173,10 +163,9 @@ def telegram_webhook():
                 send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
             return "ok"
 
-    # GPT ответ (если не лид)
     history = sessions.get(user_id, [])
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
+        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\nIf the user requests a call, return only: [CALL_REQUEST]."},
         *history[-6:],
         {"role": "user", "content": text}
     ]
@@ -190,9 +179,23 @@ def telegram_webhook():
     except Exception:
         reply = "⚠️ Ошибка OpenAI." if lang == "ru" else "⚠️ OpenAI error."
 
+    if "CALL_REQUEST" in reply:
+        reply = reply.replace("CALL_REQUEST", "").strip()
+        lead_data[user_id] = {}
+        confirm_text = "✅ Отлично! Давайте уточним пару деталей, чтобы согласовать звонок с менеджером.\n\n👋 Как к вам можно обращаться?" \
+            if lang == "ru" else \
+            "✅ Great! Let’s clarify a few details to schedule your call with our manager.\n\n👋 May I have your name?"
+        send_telegram_message(chat_id, confirm_text)
+        return "ok"
+
     sessions[user_id] = history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
-    send_telegram_message(chat_id, reply)
+    if reply:
+        send_telegram_message(chat_id, reply)
     return "ok"
+
+@app.route("/AVALON/<path:filename>")
+def serve_avalon_static(filename):
+    return send_from_directory("AVALON", filename)
 
 @app.route("/", methods=["GET"])
 def home():

@@ -47,7 +47,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     requests.post(url, json=payload)
 
-    if photo_path:
+    if photo_path and os.path.exists(photo_path):
         url_photo = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
         with open(photo_path, 'rb') as photo:
             requests.post(url_photo, files={'photo': photo}, data={'chat_id': chat_id})
@@ -67,20 +67,29 @@ def telegram_webhook():
         send_telegram_message(chat_id, welcome_text)
         return "ok"
 
-    if user_id not in lead_data and any(w in text.lower() for w in call_request_triggers):
-        lead_data[user_id] = {}
-        send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\n👋 Как к вам можно обращаться?")
-        return "ok"
+    # Обработка запроса на звонок и диалога по шагам
+    if user_id not in lead_data:
+        if any(w in text.lower() for w in call_request_triggers):
+            lead_data[user_id] = {}
+            send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\n👋 Как к вам можно обращаться?")
+            return "ok"
+    else:
+        if "name" not in lead_data[user_id]:
+            lead_data[user_id]["name"] = text
+            send_telegram_message(chat_id, "📅 Когда вам удобно созвониться? (например: сегодня вечером или завтра в 10:00)")
+            return "ok"
+        elif "time" not in lead_data[user_id]:
+            lead_data[user_id]["time"] = text
+            send_telegram_message(chat_id, "✅ Спасибо! Мы свяжемся с вами в указанное время.")
+            return "ok"
 
-    # Обработка лида (оставляем как есть для простоты)
-
-    # Отправка картинки Avalon, если упоминание
+    # Отправка картинки Avalon, если упоминается
     if "avalon" in text.lower():
         photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
         send_telegram_message(chat_id, "*Avalon* — современная недвижимость на Бали.", photo_path=photo_path)
         return "ok"
 
-    # GPT запрос с полной загрузкой документов и промпта
+    # GPT-запрос с контекстом
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},

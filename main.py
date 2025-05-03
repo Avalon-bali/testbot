@@ -1,4 +1,4 @@
-from flask import Flask, request, send_from_directory
+from flask import Flask, request
 import openai
 import requests
 import os
@@ -28,32 +28,30 @@ call_request_triggers = [
 
 system_prompt_template = {
     "ru": (
-        "Ты — AI Assistant отдела продаж компании Avalon. "
+        "Ты - AI Assistant отдела продаж компании Avalon. "
         "Ты можешь отвечать только на темы: проекты Avalon, OM, BUDDHA, TAO, инвестиции, недвижимость на Бали. "
-        "Если вопрос не по теме — мягко откажись. Отвечай как опытный менеджер. "
-        "📥 Ты всегда используешь информацию из текстов в `docs/*.txt`. "
-        "Обращай внимание на ссылки в этих текстах. Если пользователь спрашивает про PDF, презентацию или ссылку — вставь её, если она есть."
+        "Если вопрос не по теме - мягко откажись. Отвечай как опытный менеджер. "
+        "📥 Ты всегда используешь информацию из текстов в docs/*.txt. "
+        "Обращай внимание на ссылки в этих текстах. Если пользователь спрашивает про PDF, презентацию или ссылку - вставь её, если она есть."
     ),
     "uk": (
-        "Ти — AI асистент відділу продажів компанії Avalon. "
+        "Ти - AI асистент відділу продажів компанії Avalon. "
         "Ти можеш відповідати лише на теми: проєкти Avalon, OM, BUDDHA, TAO, інвестиції, нерухомість на Балі. "
-        "Якщо питання не по темі — ввічливо відмов. Відповідай як досвідчений менеджер. "
-        "📥 Завжди використовуй інформацію з текстів у `docs/*.txt`. "
-        "Звертай увагу на посилання в цих текстах. Якщо користувач питає про PDF, презентацію чи посилання — встав його, якщо воно є."
+        "Якщо питання не по темі - ввічливо відмов. Відповідай як досвідчений менеджер. "
+        "📥 Завжди використовуй інформацію з текстів у docs/*.txt. "
+        "Звертай увагу на посилання в цих текстах. Якщо користувач питає про PDF, презентацію чи посилання - встав його, якщо воно є."
     ),
     "en": (
         "You are the AI Assistant of the Avalon sales team. "
         "You may only answer questions related to: Avalon projects, OM, BUDDHA, TAO, investments, real estate in Bali. "
-        "If the question is off-topic — politely decline. Answer like a professional sales manager. "
-        "📥 Always use content from the `docs/*.txt` files. "
-        "Pay attention to links in those texts. If the user asks for a PDF, brochure or link — include it if available."
+        "If the question is off-topic - politely decline. Answer like a professional sales manager. "
+        "📥 Always use content from the docs/*.txt files. "
+        "Pay attention to links in those texts. If the user asks for a PDF, brochure or link - include it if available."
     )
 }
 
-lang = lang_code if lang_code in ["ru", "uk"] else "en"
-system_prompt = system_prompt_template.get(lang, system_prompt_template["en"])
-Ты — AI Assistant отдела продаж компании Avalon. Ты можешь отвечать только на темы: проекты Avalon, OM, BUDDHA, TAO, инвестиции, недвижимость на Бали. Если вопрос не по теме — мягко откажись. Отвечай как опытный менеджер.
-"""
+lang_code = "en"
+system_prompt = system_prompt_template.get(lang_code, system_prompt_template["en"])
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -75,7 +73,6 @@ def classify_user_input(prompt_text, user_text):
 
 def extract_lead_data(text):
     data = {}
-    text = text.strip()
     if len(text.split()) == 1 and text.isalpha():
         data["name"] = text.capitalize()
     if any(w in text.lower() for w in ["whatsapp", "ватсап", "вотсап"]):
@@ -120,91 +117,33 @@ def telegram_webhook():
         return "ok"
 
     if user_id in lead_data:
-        lead = lead_data.get(user_id, {})
+        lead = lead_data[user_id]
         step, prompt = get_step(lead)
         if step:
             label = classify_user_input(prompt, text)
             if label == "QUESTION":
-                send_telegram_message(chat_id, "❓ Сейчас уточним детали звонка. После этого я с радостью отвечу на другие вопросы!")
+                send_telegram_message(chat_id, "❓ Сейчас уточним детали звонка. После этого я отвечу на другие вопросы!")
                 return "ok"
             lead.update(extract_lead_data(text))
-            lead_data[user_id] = lead
             step, prompt = get_step(lead)
             if not step:
                 now = datetime.now().strftime("%Y-%m-%d %H:%M")
-                dt = lead.get("datetime", "").split()
-                date_part = dt[0] if len(dt) > 0 else ""
-                time_part = dt[1] if len(dt) > 1 else ""
-                datetime_raw = lead.get("datetime", "").strip().lower()
-date_part = ""
-time_part = ""
-
-for word in datetime_raw.split():
-    if word in ["сегодня", "завтра", "понедельник", "вторник", "среда", "четверг", "пятница"]:
-        date_part = word
-    elif word in ["утром", "вечером", "днем", "вечер", "утро", "после обеда"]:
-        time_part = word
-
-wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform") == "WhatsApp" and lead.get("phone") else ""
-project = ""
-text_lower = text.lower()
-if any(w in text_lower for w in ["ом", "om"]):
-    project = "OM"
-elif any(w in text_lower for w in ["buddha", "будда"]):
-    project = "BUDDHA"
-elif any(w in text_lower for w in ["tao", "тао", "тау"]):
-    project = "TAO"  # Пока не заполняется
-
-now = datetime.now().strftime("%Y-%m-%d %H:%M")
-t = text.lower()
-
-platform = lead.get("platform", "")
-wa_url = f"https://wa.me/{lead.get('phone')}" if platform == "WhatsApp" and lead.get("phone") else ""
-datetime_value = lead.get("datetime", "")
-
-project = ""
-if "ом" in t or "om" in t:
-    project = "OM"
-elif "будда" in t or "buddha" in t:
-    project = "BUDDHA"
-elif "тао" in t or "tao" in t or "тау" in t:
-    project = "TAO"
-
-sheet.append_row([
-    now,
-    lead.get("name", ""),
-    f"@{username}",
-    platform,
-    wa_url,
-    datetime_value,
-    project,
-    "ru"
-])
+                platform = lead.get("platform", "")
+                wa_url = f"https://wa.me/{lead.get('phone')}" if platform == "WhatsApp" and lead.get("phone") else ""
+                sheet.append_row([
+                    now, lead.get("name", ""), f"@{username}", platform,
+                    wa_url, lead.get("datetime", ""), "", "ru"
+                ])
                 send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
                 lead_data.pop(user_id, None)
                 return "ok"
             send_telegram_message(chat_id, prompt)
             return "ok"
 
-    # GPT fallback if no form is active
-    history = sessions.get(user_id, [])
-    messages = [
-        {"role": "system", "content": f"{system_prompt}
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text}]
+    response = openai.chat.completions.create(model="gpt-4o", messages=messages)
+    reply = response.choices[0].message.content.strip()
 
-{documents_context}"},
-        *history[-6:],
-        {"role": "user", "content": text}
-    ]
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        )
-        reply = response.choices[0].message.content.strip()
-    except Exception as e:
-        reply = "⚠️ Ошибка. Попробуйте позже."
-
-    sessions[user_id] = history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
     send_telegram_message(chat_id, reply)
     return "ok"
 

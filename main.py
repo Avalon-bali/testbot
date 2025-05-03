@@ -3,6 +3,7 @@ import openai
 import requests
 import os
 import time
+import re
 import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
@@ -19,12 +20,7 @@ gsheet = gspread.authorize(creds)
 sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
 sessions = {}
-fsm_state = {}
 lead_data = {}
-fsm_timestamps = {}
-FSM_TIMEOUT = 600
-resume_phrases = ["продолжим", "дальше", "давай продолжим", "ок, да", "запиши", "продолжи", "вернёмся", "да, записывай"]
-question_keywords = ["где", "что", "почему", "как", "когда", "какой", "куда", "сколько", "офис", "находится", "расположение"]
 
 def load_documents():
     folder = "docs"
@@ -58,29 +54,31 @@ def send_telegram_photo(chat_id, photo_url, caption=None):
 def get_lang(code):
     return "ru" if code in ["ru", "uk"] else "en"
 
-def fsm_timeout_check(user_id):
-    if user_id in fsm_timestamps:
-        if time.time() - fsm_timestamps[user_id] > FSM_TIMEOUT:
-            fsm_state.pop(user_id, None)
-            fsm_timestamps.pop(user_id, None)
-            return True
-    return False
+def extract_lead_data_from_text(text):
+    data = {}
+    text_l = text.lower()
 
-def resume_fsm(user_id, chat_id, lang):
-    data = lead_data.get(user_id, {})
-    if "name" not in data:
-        fsm_state[user_id] = "ask_name"
-        send_telegram_message(chat_id, "👋 Как к вам можно обращаться?" if lang == "ru" else "👋 May I have your name?")
-    elif "platform" not in data:
-        fsm_state[user_id] = "ask_platform"
-        send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet" if lang == "ru" else "📱 Choose platform: WhatsApp / Telegram / Zoom / Google Meet")
-    elif data.get("platform", "").lower() in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"] and "phone" not in data:
-        fsm_state[user_id] = "ask_phone"
-        send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:" if lang == "ru" else "📞 Please enter your WhatsApp number:")
-    else:
-        fsm_state[user_id] = "ask_datetime"
-        send_telegram_message(chat_id, "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?")
-    fsm_timestamps[user_id] = time.time()
+    match = re.search(r"меня зовут\s+([а-яa-z\-]+)", text_l)
+    if match:
+        data["name"] = match.group(1).capitalize()
+
+    if any(w in text_l for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"]):
+        data["platform"] = "WhatsApp"
+    elif "telegram" in text_l or "телеграм" in text_l:
+        data["platform"] = "Telegram"
+    elif "zoom" in text_l or "зум" in text_l:
+        data["platform"] = "Zoom"
+    elif "google meet" in text_l or "гугл мит" in text_l:
+        data["platform"] = "Google Meet"
+
+    phone_match = re.search(r"\+?\d{7,}", text)
+    if phone_match:
+        data["phone"] = phone_match.group(0)
+
+    if any(w in text_l for w in ["завтра", "сегодня", "утром", "вечером", "понедельник", "вторник", "в", ":"]):
+        data["datetime"] = text.strip()
+
+    return data
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -96,84 +94,57 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    if fsm_timeout_check(user_id):
-        send_telegram_message(chat_id, "⏳ Время ожидания истекло. Начнём сначала." if lang == "ru" else "⏳ Timeout. Let's start again.")
+    # Распознаём запрос об офисе
+    if any(w in text.lower() for w in ["офис", "где вы", "где находится", "адрес", "локация"]):
+        office_text = (
+            "📍 *Наш офис находится на Бали.*\n"
+            "Вы можете найти нас по адресу:\n\n"
+            "*AVALON BALI — Head Office Canggu*\n"
+            "Jl. Raya Semat, Tibubeneng, Kec. Kuta Utara,\n"
+            "Kabupaten Badung, Bali 80361\n\n"
+            "[Открыть в Google Maps](https://maps.app.goo.gl/HjUAZUNvXno8vDSY9)"
+        )
+        send_telegram_photo(chat_id, "https://files.oaiusercontent.com/file-974iU8fjsshTN7pzChX7my", caption=office_text)
         return "ok"
 
-    if user_id in fsm_state:
-        fsm_timestamps[user_id] = time.time()
-        step = fsm_state[user_id]
-        answer = text
+    # Обработка лидов
+    lead = lead_data.get(user_id, {})
+    new_info = extract_lead_data_from_text(text)
+    lead.update(new_info)
+    lead_data[user_id] = lead
 
-        if any(word in answer.lower() for word in question_keywords):
-            fsm_state.pop(user_id, None)
-            fsm_timestamps.pop(user_id, None)
-        else:
-            try:
-                lead_data[user_id] = lead_data.get(user_id, {})
-                if step == "ask_name":
-                    lower_answer = answer.lower()
-                    platform_keywords = ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап", "telegram", "телеграм", "зум", "zoom", "google", "meet", "meetings"]
-                    if any(w in lower_answer for w in platform_keywords):
-                        lead_data[user_id]["platform"] = answer
-                        if any(w in lower_answer for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"]):
-                            fsm_state[user_id] = "ask_phone"
-                            send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:" if lang == "ru" else "📞 Please enter your WhatsApp number:")
-                        else:
-                            fsm_state[user_id] = "ask_datetime"
-                            send_telegram_message(chat_id, "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?")
-                        return "ok"
-                    lead_data[user_id]["name"] = answer
-                    fsm_state[user_id] = "ask_platform"
-                    send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet" if lang == "ru" else "📱 Choose platform: WhatsApp / Telegram / Zoom / Google Meet")
-                    return "ok"
+    required_fields = ["name", "platform", "datetime"]
+    if lead.get("platform") == "WhatsApp":
+        required_fields.append("phone")
 
-                elif step == "ask_platform":
-                    lead_data[user_id]["platform"] = answer
-                    if any(w in answer.lower() for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вот сап"]):
-                        fsm_state[user_id] = "ask_phone"
-                        send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:" if lang == "ru" else "📞 Please enter your WhatsApp number:")
-                    else:
-                        fsm_state[user_id] = "ask_datetime"
-                        send_telegram_message(chat_id, "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?")
-                    return "ok"
-
-                elif step == "ask_phone":
-                    if not any(c.isdigit() for c in answer):
-                        send_telegram_message(chat_id, "❌ Неверный номер. Попробуйте ещё раз." if lang == "ru" else "❌ Invalid number. Please try again.")
-                        return "ok"
-                    lead_data[user_id]["phone"] = answer
-                    fsm_state[user_id] = "ask_datetime"
-                    send_telegram_message(chat_id, "🗓 Когда удобно созвониться?" if lang == "ru" else "🗓 When would you like to have a call?")
-                    return "ok"
-
-                elif step == "ask_datetime":
-                    lead_data[user_id]["datetime"] = answer
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    sheet.append_row([
-                        now_str,
-                        lead_data[user_id].get("name", ""),
-                        f"@{username}",
-                        lead_data[user_id].get("phone", ""),
-                        answer.split()[0] if len(answer.split()) > 0 else "",
-                        answer.split()[1] if len(answer.split()) > 1 else "",
-                        lead_data[user_id].get("platform", ""),
-                        "",
-                        lang_code
-                    ])
-                    send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер свяжется с вами." if lang == "ru" else "✅ Details saved. Manager will contact you soon.")
-                    fsm_state.pop(user_id, None)
-                    lead_data.pop(user_id, None)
-                    fsm_timestamps.pop(user_id, None)
-                    return "ok"
-            except Exception:
-                send_telegram_message(chat_id, "⚠️ Произошла ошибка. Попробуйте позже." if lang == "ru" else "⚠️ An error occurred. Please try again later.")
-                return "ok"
-
-    if any(p in text.lower() for p in resume_phrases) and user_id in lead_data:
-        resume_fsm(user_id, chat_id, lang)
+    if all(lead.get(field) for field in required_fields):
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        sheet.append_row([
+            now_str,
+            lead.get("name", ""),
+            f"@{username}",
+            lead.get("phone", ""),
+            lead.get("datetime", "").split()[0],
+            lead.get("datetime", "").split()[1] if len(lead.get("datetime", "").split()) > 1 else "",
+            lead.get("platform", ""),
+            "",
+            lang_code
+        ])
+        send_telegram_message(chat_id, "✅ Все данные получены и записаны. Менеджер скоро свяжется с вами.")
+        lead_data.pop(user_id, None)
+        return "ok"
+    else:
+        if not lead.get("name"):
+            send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
+        elif not lead.get("platform"):
+            send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
+        elif lead.get("platform") == "WhatsApp" and not lead.get("phone"):
+            send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
+        elif not lead.get("datetime"):
+            send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
         return "ok"
 
+    # /start
     if text == "/start":
         sessions[user_id] = []
         welcome = "👋 Здравствуйте! Я — AI ассистент компании Avalon.\nРад помочь вам по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?" \
@@ -182,9 +153,10 @@ def telegram_webhook():
         send_telegram_message(chat_id, welcome)
         return "ok"
 
+    # AI ответ
     history = sessions.get(user_id, [])
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\nIf the user requests a call or consultation, return only: [CALL_REQUEST]."},
+        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
         *history[-6:],
         {"role": "user", "content": text}
     ]
@@ -198,16 +170,7 @@ def telegram_webhook():
     except Exception:
         reply = "⚠️ Ошибка OpenAI." if lang == "ru" else "⚠️ OpenAI error."
 
-    if reply == "[CALL_REQUEST]":
-        fsm_state[user_id] = "ask_name"
-        lead_data[user_id] = {}
-        fsm_timestamps[user_id] = time.time()
-        send_telegram_message(chat_id, "👋 Как к вам можно обращаться?" if lang == "ru" else "👋 May I have your name?")
-        return "ok"
-
-    if reply.startswith("[") and reply.endswith("]") and "CALL_REQUEST" not in reply:
-        reply = "⚠️ Произошла техническая ошибка. Пожалуйста, повторите запрос или начните заново." if lang == "ru" else "⚠️ Technical issue. Please try again."
-
+    sessions[user_id] = history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
     send_telegram_message(chat_id, reply)
     return "ok"
 

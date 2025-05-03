@@ -46,7 +46,7 @@ def extract_lead_data_from_text(text):
     data = {}
     text_l = text.lower().strip()
 
-    match = re.search(r"(меня зовут|я|это|имя)\s+([а-яa-z\-]+)", text_l)
+    match = re.search(r"(меня зовут|я|это|имя)\\s+([а-яa-z\\-]+)", text_l)
     if match:
         data["name"] = match.group(2).capitalize()
 
@@ -62,7 +62,7 @@ def extract_lead_data_from_text(text):
     elif "google meet" in text_l or "гугл мит" in text_l:
         data["platform"] = "Google Meet"
 
-    phone_match = re.search(r"\+?\d{7,}", text)
+    phone_match = re.search(r"\\+?\\d{7,}", text)
     if phone_match:
         data["phone"] = phone_match.group(0)
 
@@ -98,41 +98,19 @@ def telegram_webhook():
 
     if user_id in lead_data:
         lead = lead_data.get(user_id, {})
-
-        if not lead.get("name") and "platform" in lead:
-            send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
-            return "ok"
-        elif not lead.get("platform"):
-            send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
-            lead.update(extract_lead_data_from_text(text))
-            lead_data[user_id] = lead
-            return "ok"
-        elif lead.get("platform", "").lower() == "whatsapp" and not lead.get("phone"):
-            send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
-            lead.update(extract_lead_data_from_text(text))
-            lead_data[user_id] = lead
-            return "ok"
-        elif not lead.get("datetime"):
-            send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
-            lead.update(extract_lead_data_from_text(text))
-            lead_data[user_id] = lead
-            return "ok"
-
-        # финальное поле
         lead.update(extract_lead_data_from_text(text))
         lead_data[user_id] = lead
 
         required_fields = ["name", "platform", "datetime"]
-        if lead.get("platform") == "WhatsApp":
+        if lead.get("platform", "").lower() == "whatsapp":
             required_fields.append("phone")
 
-        if all(lead.get(field) for field in required_fields):
-            datetime_raw = lead.get("datetime", "").strip()
-            parts = datetime_raw.split()
+        if all(lead.get(f) for f in required_fields):
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            parts = lead.get("datetime", "").split()
             date_part = parts[0] if len(parts) >= 1 else ""
             time_part = parts[1] if len(parts) >= 2 else ""
 
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
             try:
                 sheet.append_row([
                     now_str,
@@ -147,20 +125,50 @@ def telegram_webhook():
                 ])
                 send_telegram_message(chat_id, "✅ Все данные получены и записаны. Менеджер скоро свяжется с вами.")
             except Exception as e:
-                print("Ошибка записи:", e)
-                send_telegram_message(chat_id, "⚠️ Не удалось сохранить заявку. Попробуйте ещё раз.")
+                print("Ошибка записи в таблицу:", e)
+                send_telegram_message(chat_id, "⚠️ Ошибка сохранения. Попробуйте позже.")
             lead_data.pop(user_id, None)
             return "ok"
 
-    return "ok"
+        if not lead.get("name"):
+            send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
+        elif not lead.get("platform"):
+            send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
+        elif lead.get("platform", "").lower() == "whatsapp" and not lead.get("phone"):
+            send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
+        elif not lead.get("datetime"):
+            send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
+        return "ok"
 
-@app.route("/AVALON/<path:filename>")
-def serve_avalon_static(filename):
-    return send_from_directory("AVALON", filename)
+    # GPT ответ
+    history = sessions.get(user_id, [])
+    messages = [
+        {"role": "system", "content": (
+            "Ты — AI Assistant отдела продаж компании Avalon. "
+            "Отвечай только на темы: Avalon, OM, BUDDHA, TAO, инвестиции на Бали. "
+            "Если вопрос не по теме — мягко откажись."
+        )},
+        *history[-6:],
+        {"role": "user", "content": text}
+    ]
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
+        reply = response.choices[0].message.content.strip()
+    except Exception as e:
+        print("GPT error:", e)
+        reply = "⚠️ Произошла ошибка. Попробуйте позже."
+
+    sessions[user_id] = history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
+    send_telegram_message(chat_id, reply)
+    return "ok"
 
 @app.route("/")
 def home():
-    return "Avalon AI бот работает."
+    return "Avalon AI работает."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

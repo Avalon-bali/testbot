@@ -109,7 +109,8 @@ def telegram_webhook():
         send_telegram_message(chat_id, welcome)
         return "ok"
 
-    if any(w in text.lower() for w in ["офис", "где вы", "где находится", "адрес", "локация"]):
+    # универсальный ответ на вопросы об офисе
+    if any(w in text.lower() for w in ["офис", "где вы", "где находится", "адрес", "локация", "находитесь"]):
         office_text = (
             "📍 *Наш офис находится на Бали.*\n"
             "Вы можете найти нас по адресу:\n\n"
@@ -121,12 +122,27 @@ def telegram_webhook():
         send_telegram_photo(chat_id, "https://yourdomain.onrender.com/AVALON/office.jpg", caption=office_text)
         return "ok"
 
+    # начало опроса
     if user_id not in lead_data and any(w in text.lower() for w in call_request_triggers):
         lead_data[user_id] = {}
-        send_telegram_message(chat_id, "👋 Как к вам можно обращаться?")
+        send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей, чтобы согласовать звонок с менеджером.\n\n👋 Как к вам можно обращаться?")
         return "ok"
 
+    # продолжение сбора
     if user_id in lead_data:
+        # приоритетно отвечаем на вопрос, а не продолжаем опрос
+        if any(w in text.lower() for w in ["офис", "где вы", "где находится", "адрес", "локация", "находитесь"]):
+            office_text = (
+                "📍 *Наш офис находится на Бали.*\n"
+                "Вы можете найти нас по адресу:\n\n"
+                "*AVALON BALI — Head Office Canggu*\n"
+                "Jl. Raya Semat, Tibubeneng, Kec. Kuta Utara,\n"
+                "Kabupaten Badung, Bali 80361\n\n"
+                "[Открыть в Google Maps](https://maps.app.goo.gl/HjUAZUNvXno8vDSY9)"
+            )
+            send_telegram_photo(chat_id, "https://yourdomain.onrender.com/AVALON/office.jpg", caption=office_text)
+            return "ok"
+
         lead = lead_data.get(user_id, {})
         new_info = extract_lead_data_from_text(text)
         lead.update(new_info)
@@ -163,9 +179,10 @@ def telegram_webhook():
                 send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
             return "ok"
 
+    # GPT-ответ
     history = sessions.get(user_id, [])
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\nIf the user requests a call, return only: [CALL_REQUEST]."},
+        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}\n\nЕсли пользователь хочет звонок, верни только: [CALL_REQUEST]."},
         *history[-6:],
         {"role": "user", "content": text}
     ]
@@ -182,10 +199,7 @@ def telegram_webhook():
     if "CALL_REQUEST" in reply:
         reply = reply.replace("CALL_REQUEST", "").strip()
         lead_data[user_id] = {}
-        confirm_text = "✅ Отлично! Давайте уточним пару деталей, чтобы согласовать звонок с менеджером.\n\n👋 Как к вам можно обращаться?" \
-            if lang == "ru" else \
-            "✅ Great! Let’s clarify a few details to schedule your call with our manager.\n\n👋 May I have your name?"
-        send_telegram_message(chat_id, confirm_text)
+        send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей, чтобы согласовать звонок с менеджером.\n\n👋 Как к вам можно обращаться?")
         return "ok"
 
     sessions[user_id] = history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]

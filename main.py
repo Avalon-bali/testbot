@@ -21,7 +21,6 @@ sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet
 sessions = {}
 lead_data = {}
 
-# загрузка контекста из docs
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -51,7 +50,7 @@ def classify_user_input(prompt_text, user_text):
         result = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "Ты помощник. Ответь только 'ANSWER' если пользователь отвечает на вопрос, или 'QUESTION' если задаёт встречный вопрос."},
+                {"role": "system", "content": "Ответь только 'ANSWER' если пользователь отвечает на вопрос, или 'QUESTION' если задаёт встречный вопрос."},
                 {"role": "user", "content": f"Вопрос от бота: {prompt_text}\nОтвет пользователя: {user_text}"}
             ]
         )
@@ -63,11 +62,9 @@ def extract_lead_data(text):
     data = {}
     t = text.lower().strip()
 
-    # Имя (одно слово)
     if len(text.split()) == 1 and text.isalpha():
         data["name"] = text.capitalize()
 
-    # Платформы
     if any(w in t for w in ["whatsapp", "ватсап", "вотсап", "ват сап", "вацап", "вотцап"]):
         data["platform"] = "WhatsApp"
     elif any(w in t for w in ["telegram", "телеграм", "телега", "тг", "tg"]):
@@ -128,19 +125,25 @@ def telegram_webhook():
             step, prompt = get_step(lead)
             if not step:
                 now = datetime.now().strftime("%Y-%m-%d %H:%M")
-                dt = lead.get("datetime", "").split()
-                date_part = dt[0] if len(dt) > 0 else ""
-                time_part = dt[1] if len(dt) > 1 else ""
+                dt_raw = lead.get("datetime", "").strip().lower()
+                date_part = ""
+                time_part = ""
+                for word in dt_raw.split():
+                    if word in ["сегодня", "завтра", "понедельник", "вторник", "среда", "четверг", "пятница"]:
+                        date_part = word
+                    elif word in ["утром", "вечером", "днем", "вечер", "утро", "после обеда"]:
+                        time_part = word
+                wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform") == "WhatsApp" and lead.get("phone") else ""
+                project = ""  # можно позже распознать по тексту
                 try:
                     sheet.append_row([
                         now,
                         lead.get("name", ""),
                         f"@{username}",
-                        lead.get("phone", ""),
+                        wa_url,
                         date_part,
                         time_part,
-                        lead.get("platform", ""),
-                        "",
+                        project,
                         "ru"
                     ])
                 except Exception as e:

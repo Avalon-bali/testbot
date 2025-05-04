@@ -56,28 +56,48 @@ def telegram_webhook():
         send_telegram_message(chat_id, "👋 Привет! Я — AI ассистент Avalon.\nСпросите про OM, BUDDHA, TAO или инвестиции на Бали.")
         return "ok"
 
-    # FSM: продолжаем если уже начали
+    # FSM в процессе
     if user_id in lead_data:
         lead = lead_data[user_id]
+        lower_text = text.lower()
+
+        # Если это вопрос — просим завершить сначала форму
+        if "?" in text or lower_text.startswith(("где", "что", "как", "почем", "есть ли", "можно ли")):
+            send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка, а потом я с радостью помогу вам с остальными вопросами.")
+            return "ok"
+
         if "name" not in lead:
             lead["name"] = text
             send_telegram_message(chat_id, "📱 Укажите платформу для звонка: WhatsApp / Telegram / Zoom / Google Meet")
             return "ok"
+
         elif "platform" not in lead:
-            lead["platform"] = text
-            if text.lower() == "whatsapp":
+            if lower_text not in ["whatsapp", "telegram", "zoom", "google meet"]:
+                send_telegram_message(chat_id, "❗ Пожалуйста, выберите одну из предложенных платформ: WhatsApp / Telegram / Zoom / Google Meet.")
+                return "ok"
+            lead["platform"] = lower_text
+            if lower_text == "whatsapp":
                 send_telegram_message(chat_id, "📞 Пожалуйста, напишите номер WhatsApp:")
             else:
                 send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             return "ok"
-        elif lead.get("platform", "").lower() == "whatsapp" and "phone" not in lead:
-            lead["phone"] = text
+
+        elif lead.get("platform") == "whatsapp" and "phone" not in lead:
+            digits = re.sub(r"\D", "", text)
+            if len(digits) < 6:
+                send_telegram_message(chat_id, "❗ Пожалуйста, укажите корректный номер телефона.")
+                return "ok"
+            lead["phone"] = digits
             send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             return "ok"
+
         elif "datetime" not in lead:
+            if len(text) < 3 or "?" in text:
+                send_telegram_message(chat_id, "❗ Пожалуйста, уточните, в какое время вам будет удобно созвониться.")
+                return "ok"
             lead["datetime"] = text
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform", "").lower() == "whatsapp" else ""
+            wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform") == "whatsapp" else ""
             sheet.append_row([
                 now,
                 lead.get("name"),
@@ -91,11 +111,12 @@ def telegram_webhook():
             send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
             lead_data.pop(user_id, None)
             return "ok"
-        else:
-            send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка, а потом продолжим.")
-            return "ok"
 
-    # Интеллектуальный запуск FSM
+        # на всякий случай
+        send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка.")
+        return "ok"
+
+    # Умный запуск FSM
     invite_keywords = ["созвон", "звонок", "организовать звонок", "позвонить", "связаться"]
     confirm_phrases = ["да", "давайте", "ок", "хорошо", "можно", "вечером", "утром", "после обеда", "давай", "погнали"]
     last_gpt_msgs = [m["content"].lower() for m in sessions.get(user_id, []) if m["role"] == "assistant"][-3:]
@@ -105,7 +126,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\nКак к вам можно обращаться?")
         return "ok"
 
-    # Фото Avalon (по ключу в тексте)
+    # Фото Avalon (если встречается в тексте)
     if "avalon" in text.lower():
         photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
         send_telegram_message(chat_id, "Avalon — современная недвижимость на Бали.", photo_path=photo_path)
@@ -114,8 +135,10 @@ def telegram_webhook():
     # GPT логика
     history = sessions.get(user_id, [])
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}
-    ] + history[-6:] + [{"role": "user", "content": text}]
+        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
+        *history[-6:],
+        {"role": "user", "content": text}
+    ]
 
     try:
         response = openai.chat.completions.create(
@@ -148,7 +171,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot with smart FSM & Sheets is running."
+    return "Avalon bot with full FSM validation is running."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

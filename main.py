@@ -20,7 +20,7 @@ gsheet = gspread.authorize(creds)
 sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
 sessions = {}
-lead_data = {}
+session_flags = {}  # <== новый словарь для флагов (например, отправлено ли фото Avalon)
 
 def send_telegram_message(chat_id, text, photo_path=None):
     if photo_path:
@@ -91,16 +91,17 @@ def telegram_webhook():
             "en": "👋 Hello! I'm the AI assistant of Avalon. Happy to help with our projects, investments, or relocating to Bali. How can I assist you today?"
         }
         greeting = greetings.get(lang_code, greetings["en"])
-        sessions[user_id] = {}
+        sessions[user_id] = []
         lead_data.pop(user_id, None)
+        session_flags.pop(user_id, None)  # сброс флагов
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # 🖼 Показываем Avalon только один раз за сессию
-    if ("avalon" in lower_text or "авалон" in lower_text) and not sessions.get(user_id, {}).get("avalon_photo_sent"):
+    # 📸 Avalon — отправляем картинку только 1 раз за сессию
+    if ("avalon" in lower_text or "авалон" in lower_text) and not session_flags.get(user_id, {}).get("avalon_photo_sent"):
         photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
         send_telegram_message(chat_id, "Avalon | Development & Investment", photo_path=photo_path)
-        sessions.setdefault(user_id, {})["avalon_photo_sent"] = True
+        session_flags.setdefault(user_id, {})["avalon_photo_sent"] = True
 
     # GPT логика
     history = sessions.get(user_id, [])
@@ -131,7 +132,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot live with 1-time Avalon image + GPT"
+    return "Avalon bot with single Avalon image + stable GPT reply"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

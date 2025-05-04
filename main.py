@@ -58,10 +58,13 @@ def load_documents():
     return "\n\n".join(context_parts)
 
 def load_system_prompt(lang_code):
-    with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
-        full_text = f.read()
-        match = re.search(rf"### {lang_code}\n(.*?)\n###", full_text, re.DOTALL)
-        return match.group(1).strip() if match else "Ты — AI ассистент Avalon."
+    try:
+        with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
+            full_text = f.read()
+            match = re.search(rf"### {lang_code}\n(.*?)\n###", full_text, re.DOTALL)
+            return match.group(1).strip() if match else "Ты — AI ассистент Avalon."
+    except:
+        return "Ты — AI ассистент Avalon."
 
 def detect_project(messages):
     all_text = " ".join([m["content"].lower() for m in messages[-6:]])
@@ -94,9 +97,9 @@ def telegram_webhook():
 
     if lower_text == "/start":
         greetings = {
-            "ru": "👋 Привет! Я — AI ассистент Avalon. Спросите про OM, BUDDHA, TAO или инвестиции на Бали.",
-            "ua": "👋 Вітаю! Я — AI-асистент Avalon. Запитайте мене про OM, BUDDHA, TAO або інвестиції на Балі.",
-            "en": "👋 Hello! I'm the Avalon AI assistant. Ask me about OM, BUDDHA, TAO or property investment in Bali."
+            "ru": "👋 Здравствуйте! Я — AI ассистент компании Avalon. С радостью помогу по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?",
+            "ua": "👋 Вітаю! Я — AI-асистент компанії Avalon. Із задоволенням допоможу з проєктами, інвестиціями та життям на Балі. Чим можу бути корисним?",
+            "en": "👋 Hello! I'm the AI assistant of Avalon. Happy to help with our projects, investments, or relocating to Bali. How can I assist you today?"
         }
         greeting = greetings.get(lang_code, greetings["en"])
         sessions[user_id] = []
@@ -175,7 +178,6 @@ def telegram_webhook():
         send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка.")
         return "ok"
 
-    # FSM запуск
     invite_keywords = ["созвон", "звонок", "организовать звонок", "позвонить", "связаться"]
     last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
     last_gpt_msg_lower = last_gpt_msg.lower()
@@ -239,8 +241,4 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot with full language + FSM fix is running."
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    return "Avalon bot with multilingual greeting, proper FSM and prompt loading."

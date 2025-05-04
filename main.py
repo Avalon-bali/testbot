@@ -57,9 +57,11 @@ def load_documents():
                 context_parts.append(f.read())
     return "\n\n".join(context_parts)
 
-def load_system_prompt():
+def load_system_prompt(lang_code):
     with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
-        return f.read()
+        full_text = f.read()
+        match = re.search(rf"### {lang_code}\n(.*?)\n###", full_text, re.DOTALL)
+        return match.group(1).strip() if match else "Ты — AI ассистент Avalon."
 
 def detect_project(messages):
     all_text = " ".join([m["content"].lower() for m in messages[-6:]])
@@ -72,7 +74,6 @@ def detect_project(messages):
     return ""
 
 documents_context = load_documents()
-system_prompt = load_system_prompt()
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -82,16 +83,25 @@ def telegram_webhook():
     user_id = message.get("from", {}).get("id")
     text = message.get("text", "").strip()
     username = message.get("from", {}).get("username", "")
-    lang_code = message.get("from", {}).get("language_code", "ru")
+    raw_lang = message.get("from", {}).get("language_code", "en")[:2]
+    lang_code = "ru" if raw_lang == "ru" else "ua" if raw_lang == "uk" else "en"
     lower_text = text.lower()
+
+    system_prompt = load_system_prompt(lang_code)
 
     if not chat_id:
         return "no chat_id", 400
 
     if lower_text == "/start":
+        greetings = {
+            "ru": "👋 Привет! Я — AI ассистент Avalon. Спросите про OM, BUDDHA, TAO или инвестиции на Бали.",
+            "ua": "👋 Вітаю! Я — AI-асистент Avalon. Запитайте мене про OM, BUDDHA, TAO або інвестиції на Балі.",
+            "en": "👋 Hello! I'm the Avalon AI assistant. Ask me about OM, BUDDHA, TAO or property investment in Bali."
+        }
+        greeting = greetings.get(lang_code, greetings["en"])
         sessions[user_id] = []
         lead_data.pop(user_id, None)
-        send_telegram_message(chat_id, "👋 Привет! Я — AI ассистент Avalon.\nСпросите про OM, BUDDHA, TAO или инвестиции на Бали.")
+        send_telegram_message(chat_id, greeting)
         return "ok"
 
     if user_id in lead_data and lower_text in cancel_phrases:
@@ -101,6 +111,7 @@ def telegram_webhook():
 
     if user_id in lead_data:
         lead = lead_data[user_id]
+
         if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "можно", "есть ли")):
             send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка, и потом я с радостью помогу вам с остальными вопросами.")
             return "ok"
@@ -113,10 +124,10 @@ def telegram_webhook():
                 send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             else:
                 send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
-                return "ok"
+                lead_data.pop(user_id, None)
             return "ok"
 
-        elif not lead.get("platform"):
+        if not lead.get("platform"):
             norm = normalize_platform(lower_text)
             if norm not in platforms:
                 send_telegram_message(chat_id, "❗ Пожалуйста, выберите одну из предложенных платформ: WhatsApp / Telegram / Zoom / Google Meet.")
@@ -126,10 +137,10 @@ def telegram_webhook():
                 send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             else:
                 send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
-                return "ok"
+                lead_data.pop(user_id, None)
             return "ok"
 
-        elif lead.get("platform") == "whatsapp" and not lead.get("phone"):
+        if lead.get("platform") == "whatsapp" and not lead.get("phone"):
             digits = re.sub(r"\D", "", text)
             if len(digits) < 6:
                 send_telegram_message(chat_id, "❗ Пожалуйста, укажите корректный номер телефона.")
@@ -138,7 +149,7 @@ def telegram_webhook():
             send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             return "ok"
 
-        elif not lead.get("datetime"):
+        if not lead.get("datetime"):
             if len(text) < 3 or "?" in text:
                 send_telegram_message(chat_id, "❗ Пожалуйста, укажите удобное время для звонка.")
                 return "ok"
@@ -164,9 +175,8 @@ def telegram_webhook():
         send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка.")
         return "ok"
 
-    # FSM запуск по вопросу GPT
+    # FSM запуск
     invite_keywords = ["созвон", "звонок", "организовать звонок", "позвонить", "связаться"]
-
     last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
     last_gpt_msg_lower = last_gpt_msg.lower()
 
@@ -183,7 +193,7 @@ def telegram_webhook():
             lead_data[user_id]["platform"] = platform
         if datetime_value:
             lead_data[user_id]["datetime"] = datetime_value
-        send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\nКак к вам можно обращаться?")
+        send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей. Как к вам можно обращаться?")
         return "ok"
 
     if "avalon" in lower_text:
@@ -229,7 +239,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot: FSM now remembers time reply and skips double asking."
+    return "Avalon bot with full language + FSM fix is running."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

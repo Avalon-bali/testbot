@@ -22,8 +22,6 @@ sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet
 sessions = {}
 lead_data = {}
 
-# === UTILS ===
-
 def send_telegram_message(chat_id, text, photo_path=None):
     if photo_path:
         if os.path.exists(photo_path):
@@ -49,30 +47,6 @@ def send_telegram_message(chat_id, text, photo_path=None):
         response = requests.post(url, json=payload)
         print("📤 Ответ Telegram (текст):", response.status_code)
 
-def normalize_platform(text):
-    t = text.lower().strip()
-    if t in ["whatsapp", "вотсап", "ватсап"]:
-        return "whatsapp"
-    if t in ["telegram", "телеграм", "телега", "тг"]:
-        return "telegram"
-    if t in ["zoom", "зум"]:
-        return "zoom"
-    if t in ["google meet", "мит", "митап", "гугл мит", "googlemeet"]:
-        return "google meet"
-    return ""
-
-def is_confirmative_reply(text):
-    confirm = ["да", "давайте", "ок", "хорошо", "можно", "вечером", "утром", "сегодня", "завтра", "в любой день", "в любое время", "давай", "погнали"]
-    if any(p in text.lower() for p in confirm):
-        return True
-    if normalize_platform(text) in platforms:
-        return True
-    return False
-
-def extract_datetime_candidate(text):
-    candidates = ["вечером", "утром", "сегодня", "завтра", "в любой день", "в любое время", "после обеда", "до обеда"]
-    return text if any(p in text.lower() for p in candidates) else None
-
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -91,28 +65,7 @@ def load_system_prompt(lang_code):
     except:
         return "Ты — AI ассистент Avalon."
 
-def detect_project(messages):
-    all_text = " ".join([m["content"].lower() for m in messages[-6:]])
-    if "om" in all_text:
-        return "OM"
-    if "buddha" in all_text:
-        return "BUDDHA"
-    if "tao" in all_text:
-        return "TAO"
-    return ""
-
-# === FSM TEXT OPTIONS ===
-
-cancel_phrases = ["отмена", "не хочу", "передумал", "не надо", "не интересно", "потом", "сейчас не нужно"]
-platforms = ["whatsapp", "telegram", "zoom", "google meet"]
-
-final_reply_options = [
-    "✅ Все данные записаны. Менеджер скоро свяжется с вами. Если есть вопросы — я на связи.",
-    "✅ Все данные сохранены. Наш менеджер скоро свяжется с вами. А пока я могу ответить на любые ваши вопросы.",
-    "✅ Заявка передана менеджеру. Он скоро с вами свяжется. Если хотите — можем обсудить ещё что-то прямо здесь."
-]
-
-# === MAIN BOT ROUTE ===
+documents_context = load_documents()
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -126,6 +79,8 @@ def telegram_webhook():
     lang_code = "ru" if raw_lang == "ru" else "ua" if raw_lang == "uk" else "en"
     lower_text = text.lower()
     system_prompt = load_system_prompt(lang_code)
+
+    print(f"📥 Получено сообщение от {user_id}: {text}")
 
     if not chat_id:
         return "no chat_id", 400
@@ -142,16 +97,35 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # ... здесь остальная логика FSM, GPT, и в конце:
-    return "ok"
+    history = sessions.get(user_id, [])
+    messages = [
+        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
+        *history[-6:],
+        {"role": "user", "content": text}
+    ]
 
-# === HEALTH CHECK ===
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
+        reply = response.choices[0].message.content.strip()
+        reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
+    except Exception as e:
+        reply = f"Произошла ошибка при обращении к OpenAI:\n\n{e}"
+        print("❌ GPT Error:", e)
+
+    sessions[user_id] = (history + [
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": reply}
+    ])[-10:]
+
+    send_telegram_message(chat_id, reply)
+    return "ok"
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot fully updated with photo + dynamic messaging."
-
-# === LAUNCH ===
+    return "Avalon bot (image + stable response)"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -145,7 +145,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка.")
         return "ok"
 
-    # FSM запускается только если GPT предложил звонок и это был вопрос
+    # FSM запускается ТОЛЬКО если GPT задал вопрос о звонке и пользователь согласен
     invite_keywords = ["созвон", "звонок", "организовать звонок", "позвонить", "связаться"]
     confirm_phrases = ["да", "давайте", "ок", "хорошо", "можно", "вечером", "утром", "после обеда", "давай", "погнали"]
 
@@ -154,7 +154,7 @@ def telegram_webhook():
 
     if (
         user_id not in lead_data and
-        "?" in last_gpt_msg and
+        last_gpt_msg.strip().endswith("?") and
         any(k in last_gpt_msg_lower for k in invite_keywords) and
         any(p in lower_text for p in confirm_phrases)
     ):
@@ -205,7 +205,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot: FSM, платформа нормализация, всё работает."
+    return "Avalon bot: FSM запускается только при вопросе GPT + согласии пользователя."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

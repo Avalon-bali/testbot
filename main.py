@@ -76,8 +76,8 @@ def telegram_webhook():
     text = message.get("text", "").strip()
     raw_lang = message.get("from", {}).get("language_code", "en")[:2]
     lang_code = "ru" if raw_lang == "ru" else "ua" if raw_lang == "uk" else "en"
-    system_prompt = load_system_prompt(lang_code)
     lower_text = text.lower()
+    system_prompt = load_system_prompt(lang_code)
 
     print(f"📥 Сообщение от {user_id}: {text}")
 
@@ -91,23 +91,18 @@ def telegram_webhook():
             "en": "👋 Hello! I'm the AI assistant of Avalon. Happy to help with our projects, investments, or relocating to Bali. How can I assist you today?"
         }
         greeting = greetings.get(lang_code, greetings["en"])
-        sessions[user_id] = []
+        sessions[user_id] = {}
         lead_data.pop(user_id, None)
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # 📸 Обработка упоминания "avalon" или "авалон"
-    if "avalon" in lower_text or "авалон" in lower_text:
+    # 🖼 Показываем Avalon только один раз за сессию
+    if ("avalon" in lower_text or "авалон" in lower_text) and not sessions.get(user_id, {}).get("avalon_photo_sent"):
         photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
-        reply_text = (
-            "Avalon — современная недвижимость на Бали.\n\n"
-            "Один из самых известных девелоперов острова. Мы реализуем проекты OM, BUDDHA и TAO с фокусом на инвестиции, архитектуру и топовые локации.\n\n"
-            "Готов рассказать больше!"
-        )
-        send_telegram_message(chat_id, reply_text, photo_path=photo_path)
-        return "ok"
+        send_telegram_message(chat_id, "Avalon | Development & Investment", photo_path=photo_path)
+        sessions.setdefault(user_id, {})["avalon_photo_sent"] = True
 
-    # 🧠 GPT логика
+    # GPT логика
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
@@ -136,7 +131,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot is live (Avalon image auto response)."
+    return "Avalon bot live with 1-time Avalon image + GPT"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

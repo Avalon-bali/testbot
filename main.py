@@ -113,7 +113,39 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # ... FSM и остальная логика остаются без изменений ...
+    if user_id in lead_data and lower_text in cancel_phrases:
+        lead_data.pop(user_id, None)
+        send_telegram_message(chat_id, "👌 Хорошо, если передумаете — просто напишите.")
+        return "ok"
+
+    # FSM логика (сбор данных) — остаётся как в предыдущей версии...
+
+    # GPT обработка
+    history = sessions.get(user_id, [])
+    messages = [
+        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
+        *history[-6:],
+        {"role": "user", "content": text}
+    ]
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
+        reply = response.choices[0].message.content.strip()
+        reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
+    except Exception as e:
+        reply = f"Произошла ошибка при обращении к OpenAI:\n\n{e}"
+        print("❌ GPT Error:", e)
+
+    sessions[user_id] = (history + [
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": reply}
+    ])[-10:]
+
+    send_telegram_message(chat_id, reply)
+    return "ok"
 
 def send_telegram_message(chat_id, text, photo_path=None):
     if photo_path and os.path.exists(photo_path):
@@ -133,7 +165,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot with image + dynamic final message."
+    return "Avalon bot with full image support and dynamic ending."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

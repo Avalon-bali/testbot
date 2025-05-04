@@ -2,10 +2,10 @@ from flask import Flask, request
 import openai
 import requests
 import os
+import re
 import gspread
-import random
-from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
@@ -21,6 +21,11 @@ sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet
 sessions = {}
 lead_data = {}
 
+call_request_triggers = [
+    "созвон", "поговорить", "менеджер", "хочу звонок", "можно позвонить",
+    "звонок", "давайте созвонимся", "обсудить", "свяжитесь со мной"
+]
+
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -30,22 +35,21 @@ def load_documents():
                 context_parts.append(f.read())
     return "\n\n".join(context_parts)
 
-def load_system_prompt():
-    with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
-        return f.read()
-
-documents_context = load_documents()
-system_prompt = load_system_prompt()
-
-call_request_triggers = [
-    "созвон", "поговорить", "менеджер", "хочу звонок",
-    "можно позвонить", "звонок", "давайте созвонимся",
-    "обсудить", "свяжитесь со мной"
-]
+def load_system_prompt(lang):
+    fallback = "Ты — AI Assistant отдела продаж компании Avalon..."
+    try:
+        with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
+            full_text = f.read()
+            match = re.search(rf"### {lang}\n(.*?)\n###", full_text, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+    except:
+        pass
+    return fallback
 
 def send_telegram_message(chat_id, text, photo_path=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    payload = {"chat_id": chat_id, "text": text}
     requests.post(url, json=payload)
 
     if photo_path and os.path.exists(photo_path):
@@ -61,82 +65,73 @@ def telegram_webhook():
     user_id = message.get("from", {}).get("id")
     text = message.get("text", "").strip()
     username = message.get("from", {}).get("username", "")
+    lang_code = message.get("from", {}).get("language_code", "ru")
 
     if text.lower() == "/start":
-        welcome_text = "👋 Привет! Я — AI ассистент Avalon.\nСпросите про OM, BUDDHA, TAO или про инвестиции на Бали."
-        sessions[user_id] = []
-        send_telegram_message(chat_id, welcome_text)
+        send_telegram_message(chat_id, "👋 Здравствуйте! Я — AI ассистент компании Avalon. Чем могу быть полезен?")
         return "ok"
 
-    # Логика по шагам заполнения данных для звонка
-    if user_id not in lead_data:
-        if any(w in text.lower() for w in call_request_triggers):
-            lead_data[user_id] = {}
-            send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\n👋 Как к вам можно обращаться?")
+    if user_id not in lead_data and any(w in text.lower() for w in call_request_triggers):
+        lead_data[user_id] = {}
+        send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\n👋 Как к вам можно обращаться?")
+        return "ok"
+
+    if user_id in lead_data:
+        lead = lead_data[user_id]
+        if "name" not in lead:
+            lead["name"] = text.capitalize()
+            send_telegram_message(chat_id, "📱 Укажите платформу: WhatsApp / Telegram / Zoom / Google Meet")
             return "ok"
-    else:
-        # Отклонение от сценария
-        if "name" not in lead_data[user_id] and "?" in text:
-            send_telegram_message(chat_id, "📌 Давайте сначала закончим с оформлением звонка, и я обязательно отвечу на ваш вопрос!")
-            return "ok"
-        if "name" not in lead_data[user_id]:
-            lead_data[user_id]["name"] = text
-            send_telegram_message(chat_id, "📞 Что вам удобнее: Zoom или WhatsApp?")
-            return "ok"
-        elif "platform" not in lead_data[user_id]:
-            if "zoom" in text.lower():
-                lead_data[user_id]["platform"] = "Zoom"
+        elif "platform" not in lead:
+            lead["platform"] = text.capitalize()
+            if lead["platform"].lower() == "whatsapp":
+                send_telegram_message(chat_id, "📞 Напишите номер WhatsApp:")
+            else:
                 send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
-                return "ok"
-            elif "whatsapp" in text.lower() or "вотсап" in text.lower():
-                lead_data[user_id]["platform"] = "WhatsApp"
-                send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
-                return "ok"
-            elif "?" in text:
-                send_telegram_message(chat_id, "📌 Давайте сначала завершим с выбором платформы — Zoom или WhatsApp?")
-                return "ok"
-        elif "time" not in lead_data[user_id]:
-            if "?" in text:
-                send_telegram_message(chat_id, "📌 Сначала укажите, когда вам удобно созвониться, и я вернусь к вашему вопросу.")
-                return "ok"
-            lead_data[user_id]["time"] = text
-            send_telegram_message(chat_id, f"✅ Спасибо! Мы свяжемся с вами в удобное для вас время — *{text}*.")
+            return "ok"
+        elif lead.get("platform", "").lower() == "whatsapp" and "phone" not in lead:
+            lead["phone"] = text
+            send_telegram_message(chat_id, "🗓 Когда удобно созвониться?")
+            return "ok"
+        elif "datetime" not in lead:
+            lead["datetime"] = text
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform").lower() == "whatsapp" else ""
+            sheet.append_row([
+                now, lead.get("name"), f"@{username}", lead.get("platform"),
+                wa_url, lead.get("datetime"), "", lang_code
+            ])
+            send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
+            lead_data.pop(user_id, None)
             return "ok"
 
-    # GPT-запрос
+    if "avalon" in text.lower():
+        photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
+        send_telegram_message(chat_id, "Avalon – современная недвижимость на Бали.", photo_path=photo_path)
+        return "ok"
+
+    # GPT-ответ
+    documents_context = load_documents()
+    system_prompt = load_system_prompt(lang_code)
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
         *history[-6:],
         {"role": "user", "content": text}
     ]
-
     try:
         response = openai.chat.completions.create(model="gpt-4o", messages=messages)
         reply = response.choices[0].message.content.strip()
-
-        # если пользователь упомянул Avalon — прикрепляем фото
-        if "avalon" in text.lower():
-            folder = "AVALON/avalon-photos"
-            try:
-                images = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
-                if images:
-                    selected_image = random.choice(images)
-                    send_telegram_message(chat_id, reply, photo_path=selected_image)
-                    return "ok"
-            except Exception as e:
-                print(f"Ошибка при загрузке изображения Avalon: {e}")
-
-    except Exception as e:
+    except Exception:
         reply = "Произошла ошибка при обращении к OpenAI."
 
-    sessions[user_id] = (history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}])[-10:]
+    sessions[user_id] = history[-8:] + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
     send_telegram_message(chat_id, reply)
     return "ok"
 
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
-    return "Avalon GPT bot is running."
+    return "Avalon AI бот работает."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -1,10 +1,10 @@
+import random
 import os
 import re
-import random
-import openai
 import requests
-from flask import Flask, request
+import openai
 import gspread
+from flask import Flask, request
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -39,7 +39,11 @@ def send_telegram_message(chat_id, text, photo_path=None):
         else:
             print("❌ Файл не найден:", photo_path)
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            payload = {"chat_id": chat_id, "text": text + "\n\n⚠️ Картинка не найдена.", "parse_mode": "Markdown"}
+            payload = {
+                "chat_id": chat_id,
+                "text": text + "\n\n⚠️ Картинка не найдена.",
+                "parse_mode": "Markdown"
+            }
             requests.post(url, json=payload)
     else:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -95,6 +99,18 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
+    # 📸 Отдельная реакция на "авалон"
+    if "avalon" in text.lower():
+        photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
+        reply_text = (
+            "Avalon — современная недвижимость на Бали.\n\n"
+            "Один из самых известных девелоперов острова. Мы реализуем проекты OM, BUDDHA и TAO с фокусом на инвестиции, архитектуру и топовые локации.\n\n"
+            "Готов рассказать больше!"
+        )
+        send_telegram_message(chat_id, reply_text, photo_path=photo_path)
+        return "ok"
+
+    # GPT логика
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
@@ -121,24 +137,9 @@ def telegram_webhook():
     send_telegram_message(chat_id, reply)
     return "ok"
 
-@app.route("/test-photo", methods=["GET"])
-def test_photo():
-    chat_id = os.environ.get("TEST_CHAT_ID")
-    if not chat_id:
-        return "❌ TEST_CHAT_ID не задан", 400
-
-    photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
-
-    if not os.path.exists(photo_path):
-        print("❌ Файл не найден:", photo_path)
-        return f"❌ Файл не найден: {photo_path}", 404
-
-    send_telegram_message(chat_id, "🧪 Тест картинки Avalon", photo_path=photo_path)
-    return "✅ Картинка отправлена в Telegram", 200
-
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot: image test ready."
+    return "Avalon bot live — with photo + prompt + return OK."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

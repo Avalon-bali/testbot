@@ -20,7 +20,8 @@ gsheet = gspread.authorize(creds)
 sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet1
 
 sessions = {}
-session_flags = {}  # <== новый словарь для флагов (например, отправлено ли фото Avalon)
+lead_data = {}         # ✅ Вернули это
+session_flags = {}     # флаги (например, отправлено ли изображение)
 
 def send_telegram_message(chat_id, text, photo_path=None):
     if photo_path:
@@ -34,8 +35,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
                     'caption': text,
                     'parse_mode': 'Markdown'
                 }
-                response = requests.post(url_photo, files=files, data=data)
-                print("📤 Ответ Telegram (фото):", response.status_code)
+                requests.post(url_photo, files=files, data=data)
         else:
             print("❌ Файл не найден:", photo_path)
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -44,8 +44,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
     else:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-        response = requests.post(url, json=payload)
-        print("📤 Ответ Telegram (текст):", response.status_code)
+        requests.post(url, json=payload)
 
 def load_documents():
     folder = "docs"
@@ -93,17 +92,17 @@ def telegram_webhook():
         greeting = greetings.get(lang_code, greetings["en"])
         sessions[user_id] = []
         lead_data.pop(user_id, None)
-        session_flags.pop(user_id, None)  # сброс флагов
+        session_flags.pop(user_id, None)
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # 📸 Avalon — отправляем картинку только 1 раз за сессию
+    # Avalon: одноразовая отправка картинки
     if ("avalon" in lower_text or "авалон" in lower_text) and not session_flags.get(user_id, {}).get("avalon_photo_sent"):
         photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
         send_telegram_message(chat_id, "Avalon | Development & Investment", photo_path=photo_path)
         session_flags.setdefault(user_id, {})["avalon_photo_sent"] = True
 
-    # GPT логика
+    # GPT
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
@@ -132,7 +131,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot with single Avalon image + stable GPT reply"
+    return "Avalon bot is running."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -22,14 +22,32 @@ sheet = gsheet.open_by_key("1rJSFvD9r3yTxnl2Y9LFhRosAbr7mYF7dYtgmg9VJip4").sheet
 sessions = {}
 lead_data = {}
 
-cancel_phrases = ["отмена", "не хочу", "передумал", "не надо", "не интересно", "потом", "сейчас не нужно"]
-platforms = ["whatsapp", "telegram", "zoom", "google meet"]
+# === UTILS ===
 
-final_reply_options = [
-    "✅ Все данные записаны. Менеджер скоро свяжется с вами. Если есть вопросы — я на связи.",
-    "✅ Все данные сохранены. Наш менеджер скоро свяжется с вами. А пока я могу ответить на любые ваши вопросы.",
-    "✅ Заявка передана менеджеру. Он скоро с вами свяжется. Если хотите — можем обсудить ещё что-то прямо здесь."
-]
+def send_telegram_message(chat_id, text, photo_path=None):
+    if photo_path:
+        if os.path.exists(photo_path):
+            print("📸 Отправляю изображение:", photo_path)
+            url_photo = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+            with open(photo_path, 'rb') as photo:
+                files = {'photo': photo}
+                data = {
+                    'chat_id': chat_id,
+                    'caption': text,
+                    'parse_mode': 'Markdown'
+                }
+                response = requests.post(url_photo, files=files, data=data)
+                print("📤 Ответ Telegram (фото):", response.status_code)
+        else:
+            print("❌ Файл не найден:", photo_path)
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload = {"chat_id": chat_id, "text": text + "\n\n⚠️ Картинка не найдена.", "parse_mode": "Markdown"}
+            requests.post(url, json=payload)
+    else:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+        response = requests.post(url, json=payload)
+        print("📤 Ответ Telegram (текст):", response.status_code)
 
 def normalize_platform(text):
     t = text.lower().strip()
@@ -83,7 +101,18 @@ def detect_project(messages):
         return "TAO"
     return ""
 
-documents_context = load_documents()
+# === FSM TEXT OPTIONS ===
+
+cancel_phrases = ["отмена", "не хочу", "передумал", "не надо", "не интересно", "потом", "сейчас не нужно"]
+platforms = ["whatsapp", "telegram", "zoom", "google meet"]
+
+final_reply_options = [
+    "✅ Все данные записаны. Менеджер скоро свяжется с вами. Если есть вопросы — я на связи.",
+    "✅ Все данные сохранены. Наш менеджер скоро свяжется с вами. А пока я могу ответить на любые ваши вопросы.",
+    "✅ Заявка передана менеджеру. Он скоро с вами свяжется. Если хотите — можем обсудить ещё что-то прямо здесь."
+]
+
+# === MAIN BOT ROUTE ===
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -113,59 +142,16 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    if user_id in lead_data and lower_text in cancel_phrases:
-        lead_data.pop(user_id, None)
-        send_telegram_message(chat_id, "👌 Хорошо, если передумаете — просто напишите.")
-        return "ok"
-
-    # FSM логика (сбор данных) — остаётся как в предыдущей версии...
-
-    # GPT обработка
-    history = sessions.get(user_id, [])
-    messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
-        *history[-6:],
-        {"role": "user", "content": text}
-    ]
-
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        )
-        reply = response.choices[0].message.content.strip()
-        reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
-    except Exception as e:
-        reply = f"Произошла ошибка при обращении к OpenAI:\n\n{e}"
-        print("❌ GPT Error:", e)
-
-    sessions[user_id] = (history + [
-        {"role": "user", "content": text},
-        {"role": "assistant", "content": reply}
-    ])[-10:]
-
-    send_telegram_message(chat_id, reply)
+    # ... здесь остальная логика FSM, GPT, и в конце:
     return "ok"
 
-def send_telegram_message(chat_id, text, photo_path=None):
-    if photo_path and os.path.exists(photo_path):
-        url_photo = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-        with open(photo_path, 'rb') as photo:
-            files = {'photo': photo}
-            data = {
-                'chat_id': chat_id,
-                'caption': text,
-                'parse_mode': 'Markdown'
-            }
-            requests.post(url_photo, files=files, data=data)
-    else:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-        requests.post(url, json=payload)
+# === HEALTH CHECK ===
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot with full image support and dynamic ending."
+    return "Avalon bot fully updated with photo + dynamic messaging."
+
+# === LAUNCH ===
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

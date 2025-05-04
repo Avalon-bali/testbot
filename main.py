@@ -39,11 +39,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
         else:
             print("❌ Файл не найден:", photo_path)
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            payload = {
-                "chat_id": chat_id,
-                "text": text + "\n\n⚠️ Картинка не найдена.",
-                "parse_mode": "Markdown"
-            }
+            payload = {"chat_id": chat_id, "text": text + "\n\n⚠️ Картинка не найдена.", "parse_mode": "Markdown"}
             requests.post(url, json=payload)
     else:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -81,6 +77,7 @@ def telegram_webhook():
     raw_lang = message.get("from", {}).get("language_code", "en")[:2]
     lang_code = "ru" if raw_lang == "ru" else "ua" if raw_lang == "uk" else "en"
     system_prompt = load_system_prompt(lang_code)
+    lower_text = text.lower()
 
     print(f"📥 Сообщение от {user_id}: {text}")
 
@@ -99,8 +96,8 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # 📸 Отдельная реакция на "авалон"
-    if "avalon" in text.lower():
+    # 📸 Обработка упоминания "avalon" или "авалон"
+    if "avalon" in lower_text or "авалон" in lower_text:
         photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
         reply_text = (
             "Avalon — современная недвижимость на Бали.\n\n"
@@ -110,7 +107,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, reply_text, photo_path=photo_path)
         return "ok"
 
-    # GPT логика
+    # 🧠 GPT логика
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
@@ -139,7 +136,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot live — with photo + prompt + return OK."
+    return "Avalon bot is live (Avalon image auto response)."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -89,7 +89,6 @@ def telegram_webhook():
     raw_lang = message.get("from", {}).get("language_code", "en")[:2]
     lang_code = "ru" if raw_lang == "ru" else "ua" if raw_lang == "uk" else "en"
     lower_text = text.lower()
-
     system_prompt = load_system_prompt(lang_code)
 
     if not chat_id:
@@ -114,6 +113,7 @@ def telegram_webhook():
 
     if user_id in lead_data:
         lead = lead_data[user_id]
+
         if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "можно", "есть ли")):
             send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка, и потом я с радостью помогу вам с остальными вопросами.")
             return "ok"
@@ -241,7 +241,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot with multilingual greeting and full prompt."
+    return "Avalon bot ready."
 
 if __name__ == "__main__":
     port_env = os.environ.get("PORT")

@@ -114,7 +114,6 @@ def telegram_webhook():
 
     if user_id in lead_data:
         lead = lead_data[user_id]
-
         if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "можно", "есть ли")):
             send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка, и потом я с радостью помогу вам с остальными вопросами.")
             return "ok"
@@ -178,6 +177,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка.")
         return "ok"
 
+    # FSM запуск
     invite_keywords = ["созвон", "звонок", "организовать звонок", "позвонить", "связаться"]
     last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
     last_gpt_msg_lower = last_gpt_msg.lower()
@@ -241,4 +241,10 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot with multilingual greeting, proper FSM and prompt loading."
+    return "Avalon bot with multilingual greeting and full prompt."
+
+if __name__ == "__main__":
+    port_env = os.environ.get("PORT")
+    port = int(port_env) if port_env else 5000
+    print(f"🟢 Starting Avalon bot on port {port} (Render should bind to this)")
+    app.run(host="0.0.0.0", port=port)

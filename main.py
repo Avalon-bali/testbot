@@ -36,6 +36,14 @@ def normalize_platform(text):
         return "google meet"
     return ""
 
+def is_confirmative_reply(text):
+    confirm = ["да", "давайте", "ок", "хорошо", "можно", "вечером", "утром", "после обеда", "давай", "погнали"]
+    if any(p in text for p in confirm):
+        return True
+    if normalize_platform(text) in platforms:
+        return True
+    return False
+
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -145,9 +153,8 @@ def telegram_webhook():
         send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка.")
         return "ok"
 
-    # FSM запускается ТОЛЬКО если GPT задал вопрос о звонке и пользователь согласен
+    # FSM: только если GPT предложил звонок и это был вопрос + пользователь дал разумный ответ
     invite_keywords = ["созвон", "звонок", "организовать звонок", "позвонить", "связаться"]
-    confirm_phrases = ["да", "давайте", "ок", "хорошо", "можно", "вечером", "утром", "после обеда", "давай", "погнали"]
 
     last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
     last_gpt_msg_lower = last_gpt_msg.lower()
@@ -156,7 +163,7 @@ def telegram_webhook():
         user_id not in lead_data and
         last_gpt_msg.strip().endswith("?") and
         any(k in last_gpt_msg_lower for k in invite_keywords) and
-        any(p in lower_text for p in confirm_phrases)
+        is_confirmative_reply(lower_text)
     ):
         lead_data[user_id] = {}
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\nКак к вам можно обращаться?")
@@ -205,7 +212,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot: FSM запускается только при вопросе GPT + согласии пользователя."
+    return "Avalon bot with universal FSM: triggered only on GPT question + valid user reply."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

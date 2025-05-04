@@ -24,6 +24,18 @@ lead_data = {}
 cancel_phrases = ["отмена", "не хочу", "передумал", "не надо", "не интересно", "потом", "сейчас не нужно"]
 platforms = ["whatsapp", "telegram", "zoom", "google meet"]
 
+def normalize_platform(text):
+    t = text.lower().strip()
+    if t in ["whatsapp", "вотсап", "ватсап"]:
+        return "whatsapp"
+    if t in ["telegram", "телеграм", "телега", "тг"]:
+        return "telegram"
+    if t in ["zoom", "зум"]:
+        return "zoom"
+    if t in ["google meet", "мит", "митап", "гугл мит", "googlemeet"]:
+        return "google meet"
+    return ""
+
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -87,11 +99,12 @@ def telegram_webhook():
             return "ok"
 
         elif "platform" not in lead:
-            if lower_text not in platforms:
+            norm = normalize_platform(lower_text)
+            if norm not in platforms:
                 send_telegram_message(chat_id, "❗ Пожалуйста, выберите одну из предложенных платформ: WhatsApp / Telegram / Zoom / Google Meet.")
                 return "ok"
-            lead["platform"] = lower_text
-            if lower_text == "whatsapp":
+            lead["platform"] = norm
+            if norm == "whatsapp":
                 send_telegram_message(chat_id, "📞 Пожалуйста, напишите номер WhatsApp:")
             else:
                 send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
@@ -192,7 +205,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot is running with strict FSM trigger by GPT-question."
+    return "Avalon bot: FSM, платформа нормализация, всё работает."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

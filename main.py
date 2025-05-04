@@ -14,11 +14,6 @@ openai.api_key = OPENAI_API_KEY
 sessions = {}
 lead_data = {}
 
-call_request_triggers = [
-    "созвон", "поговорить", "менеджер", "хочу звонок", "можно позвонить",
-    "звонок", "давайте созвонимся", "обсудить", "свяжитесь со мной"
-]
-
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -41,26 +36,21 @@ def telegram_webhook():
     message = data.get("message", {})
     chat_id = message.get("chat", {}).get("id")
     user_id = message.get("from", {}).get("id")
-    text = message.get("text", "").strip()
+    text = message.get("text", "").strip().lower()
     username = message.get("from", {}).get("username", "")
     lang_code = message.get("from", {}).get("language_code", "ru")
 
     if not chat_id:
         return "no chat_id", 400
 
-    if text.lower() == "/start":
+    if text == "/start":
         welcome = "👋 Привет! Я — AI ассистент Avalon.\nСпросите про OM, BUDDHA, TAO или про инвестиции на Бали."
         sessions[user_id] = []
         lead_data.pop(user_id, None)
         send_telegram_message(chat_id, welcome)
         return "ok"
 
-    # FSM: начало при ключевых словах
-    if user_id not in lead_data and any(w in text.lower() for w in call_request_triggers):
-        lead_data[user_id] = {}
-        send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\nКак к вам можно обращаться?")
-        return "ok"
-
+    # FSM: если пользователь в процессе
     if user_id in lead_data:
         lead = lead_data[user_id]
         if "name" not in lead:
@@ -87,8 +77,24 @@ def telegram_webhook():
             send_telegram_message(chat_id, "📌 Давайте сначала завершим оформление деталей звонка, и я сразу продолжу.")
             return "ok"
 
-    # GPT логика
+    # Получаем историю и проверяем последнее сообщение GPT
     history = sessions.get(user_id, [])
+    last_bot_message = ""
+    for msg in reversed(history):
+        if msg["role"] == "assistant":
+            last_bot_message = msg["content"].lower()
+            break
+
+    # Если в последнем сообщении GPT была фраза о звонке и пользователь соглашается — начинаем FSM
+    invite_keywords = ["созвон", "позвонить", "звонок", "организовать звонок", "связаться"]
+    confirm_phrases = ["да", "давайте", "ок", "хорошо", "можно", "после обеда", "давай", "погнали"]
+
+    if any(k in last_bot_message for k in invite_keywords) and any(c in text for c in confirm_phrases):
+        lead_data[user_id] = {}
+        send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\nКак к вам можно обращаться?")
+        return "ok"
+
+    # GPT генерация
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"}
     ] + history[-6:] + [
@@ -125,7 +131,7 @@ def send_telegram_message(chat_id, text):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot is running with GPT + FSM lead form."
+    return "Avalon bot with smart FSM is running."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

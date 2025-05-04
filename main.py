@@ -153,7 +153,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка.")
         return "ok"
 
-    # FSM: только если GPT предложил звонок и это был вопрос + пользователь дал разумный ответ
+    # FSM: по вопросу GPT и подтверждению (в т.ч. сразу с выбором платформы)
     invite_keywords = ["созвон", "звонок", "организовать звонок", "позвонить", "связаться"]
 
     last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
@@ -165,7 +165,10 @@ def telegram_webhook():
         any(k in last_gpt_msg_lower for k in invite_keywords) and
         is_confirmative_reply(lower_text)
     ):
+        platform = normalize_platform(lower_text)
         lead_data[user_id] = {}
+        if platform in platforms:
+            lead_data[user_id]["platform"] = platform
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\nКак к вам можно обращаться?")
         return "ok"
 
@@ -212,7 +215,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot with universal FSM: triggered only on GPT question + valid user reply."
+    return "Avalon bot — FSM с определением платформы по ответу на вопрос."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

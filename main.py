@@ -160,16 +160,20 @@ def telegram_webhook():
             project = detect_project(history)
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
             wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform") == "whatsapp" else ""
-            sheet.append_row([
-                now,
-                lead.get("name"),
-                f"@{username}",
-                lead.get("platform"),
-                wa_url,
-                lead.get("datetime"),
-                project,
-                lang_code
-            ])
+            try:
+                sheet.append_row([
+                    now,
+                    lead.get("name"),
+                    f"@{username}",
+                    lead.get("platform"),
+                    wa_url,
+                    lead.get("datetime"),
+                    project,
+                    lang_code
+                ])
+                print("✅ Лид успешно добавлен в таблицу:", lead.get("name"))
+            except Exception as e:
+                print("⚠️ Ошибка при добавлении в таблицу:", e)
             send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
             lead_data.pop(user_id, None)
             return "ok"
@@ -244,7 +248,6 @@ def home():
     return "Avalon bot ready."
 
 if __name__ == "__main__":
-    port_env = os.environ.get("PORT")
-    port = int(port_env) if port_env else 5000
-    print(f"🟢 Starting Avalon bot on port {port} (Render should bind to this)")
+    port = int(os.environ.get("PORT", 5000))
+    print(f"🟢 Starting Avalon bot on port {port}")
     app.run(host="0.0.0.0", port=port)

@@ -1,3 +1,4 @@
+import random
 from flask import Flask, request
 import openai
 import requests
@@ -23,6 +24,12 @@ lead_data = {}
 
 cancel_phrases = ["отмена", "не хочу", "передумал", "не надо", "не интересно", "потом", "сейчас не нужно"]
 platforms = ["whatsapp", "telegram", "zoom", "google meet"]
+
+final_reply_options = [
+    "✅ Все данные записаны. Менеджер скоро свяжется с вами. Если есть вопросы — я на связи.",
+    "✅ Все данные сохранены. Готов помочь, если у вас остались вопросы.",
+    "✅ Заявка передана менеджеру. А пока — можете задать любые дополнительные вопросы."
+]
 
 def normalize_platform(text):
     t = text.lower().strip()
@@ -125,7 +132,7 @@ def telegram_webhook():
             elif not lead.get("datetime"):
                 send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             else:
-                send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
+                send_telegram_message(chat_id, random.choice(final_reply_options))
                 lead_data.pop(user_id, None)
             return "ok"
 
@@ -138,7 +145,7 @@ def telegram_webhook():
             if not lead.get("datetime"):
                 send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             else:
-                send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
+                send_telegram_message(chat_id, random.choice(final_reply_options))
                 lead_data.pop(user_id, None)
             return "ok"
 
@@ -174,7 +181,7 @@ def telegram_webhook():
                 print("✅ Лид успешно добавлен в таблицу:", lead.get("name"))
             except Exception as e:
                 print("⚠️ Ошибка при добавлении в таблицу:", e)
-            send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
+            send_telegram_message(chat_id, random.choice(final_reply_options))
             lead_data.pop(user_id, None)
             return "ok"
 
@@ -245,7 +252,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot ready."
+    return "Avalon bot is live with dynamic final message."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

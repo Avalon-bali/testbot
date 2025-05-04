@@ -24,6 +24,29 @@ lead_data = {}
 cancel_phrases = ["отмена", "не хочу", "передумал", "не надо", "не интересно", "потом", "сейчас не нужно"]
 platforms = ["whatsapp", "telegram", "zoom", "google meet"]
 
+def normalize_platform(text):
+    t = text.lower().strip()
+    if t in ["whatsapp", "вотсап", "ватсап"]:
+        return "whatsapp"
+    if t in ["telegram", "телеграм", "телега", "тг"]:
+        return "telegram"
+    if t in ["zoom", "зум"]:
+        return "zoom"
+    if t in ["google meet", "мит", "митап", "гугл мит", "googlemeet"]:
+        return "google meet"
+    return ""
+
+def detect_lang(text):
+    cyrillic = len(re.findall(r"[а-яА-Я]", text))
+    latin = len(re.findall(r"[a-zA-Z]", text))
+    french = len(re.findall(r"\b(merci|bonjour|projet|investissement)\b", text.lower()))
+    if cyrillic > latin:
+        return "ru"
+    elif french > 0:
+        return "fr"
+    else:
+        return "en"
+
 def load_documents():
     folder = "docs"
     context_parts = []
@@ -33,9 +56,17 @@ def load_documents():
                 context_parts.append(f.read())
     return "\n\n".join(context_parts)
 
-def load_system_prompt():
-    with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
-        return f.read()
+def load_system_prompt(lang_code):
+    fallback = "Ты — AI ассистент компании Avalon..."
+    try:
+        with open("docs/system_prompt.txt", "r", encoding="utf-8") as f:
+            full_text = f.read()
+            match = re.search(rf"### {lang_code}\n(.*?)\n###", full_text, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+    except:
+        pass
+    return fallback
 
 def detect_project(messages):
     all_text = " ".join([m["content"].lower() for m in messages[-6:]])
@@ -48,7 +79,6 @@ def detect_project(messages):
     return ""
 
 documents_context = load_documents()
-system_prompt = load_system_prompt()
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -58,8 +88,9 @@ def telegram_webhook():
     user_id = message.get("from", {}).get("id")
     text = message.get("text", "").strip()
     username = message.get("from", {}).get("username", "")
-    lang_code = message.get("from", {}).get("language_code", "ru")
     lower_text = text.lower()
+    lang_code = detect_lang(text)
+    system_prompt = load_system_prompt(lang_code)
 
     if not chat_id:
         return "no chat_id", 400
@@ -67,19 +98,17 @@ def telegram_webhook():
     if lower_text == "/start":
         sessions[user_id] = []
         lead_data.pop(user_id, None)
-        send_telegram_message(chat_id, "👋 Привет! Я — AI ассистент Avalon.\nСпросите про OM, BUDDHA, TAO или инвестиции на Бали.")
+        send_telegram_message(chat_id, "👋 Привет! Я — AI ассистент Avalon. Спросите про OM, BUDDHA, TAO или инвестиции на Бали.")
         return "ok"
 
-    # Отмена
     if user_id in lead_data and lower_text in cancel_phrases:
         lead_data.pop(user_id, None)
         send_telegram_message(chat_id, "👌 Хорошо, если передумаете — просто напишите.")
         return "ok"
 
-    # FSM
     if user_id in lead_data:
         lead = lead_data[user_id]
-        if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "можно", "есть ли")):
+        if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "можно", "есть ли", "покажи", "инстаграм", "видео", "сайт")):
             send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка, и потом я с радостью помогу вам с остальными вопросами.")
             return "ok"
 
@@ -89,11 +118,12 @@ def telegram_webhook():
             return "ok"
 
         elif "platform" not in lead:
-            if lower_text not in platforms:
+            norm = normalize_platform(lower_text)
+            if norm not in platforms:
                 send_telegram_message(chat_id, "❗ Пожалуйста, выберите одну из предложенных платформ: WhatsApp / Telegram / Zoom / Google Meet.")
                 return "ok"
-            lead["platform"] = lower_text
-            if lower_text == "whatsapp":
+            lead["platform"] = norm
+            if norm == "whatsapp":
                 send_telegram_message(chat_id, "📞 Пожалуйста, напишите номер WhatsApp:")
             else:
                 send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
@@ -110,7 +140,7 @@ def telegram_webhook():
 
         elif "datetime" not in lead:
             if len(text) < 3 or "?" in text:
-                send_telegram_message(chat_id, "❗ Пожалуйста, укажите удобное время для звонка.")
+                send_telegram_message(chat_id, "❗ Пожалуйста, уточните, в какое время вам будет удобно созвониться.")
                 return "ok"
             lead["datetime"] = text
             history = sessions.get(user_id, [])
@@ -134,23 +164,23 @@ def telegram_webhook():
         send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка.")
         return "ok"
 
-    # Запуск FSM (только если последний GPT предложил звонок)
+    # FSM запуск
     invite_keywords = ["созвон", "звонок", "организовать звонок", "позвонить", "связаться"]
     confirm_phrases = ["да", "давайте", "ок", "хорошо", "можно", "вечером", "утром", "после обеда", "давай", "погнали"]
+    last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
+    last_gpt_msg_lower = last_gpt_msg.lower()
 
-    last_gpt_msg = next((m["content"].lower() for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
-    if user_id not in lead_data and any(k in last_gpt_msg for k in invite_keywords) and any(p in lower_text for p in confirm_phrases):
+    if (
+        user_id not in lead_data and
+        "?" in last_gpt_msg and
+        any(k in last_gpt_msg_lower for k in invite_keywords) and
+        any(p in lower_text for p in confirm_phrases)
+    ):
         lead_data[user_id] = {}
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\nКак к вам можно обращаться?")
         return "ok"
 
-    # Фото Avalon
-    if "avalon" in lower_text:
-        photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
-        send_telegram_message(chat_id, "Avalon — современная недвижимость на Бали.", photo_path=photo_path)
-        return "ok"
-
-    # GPT
+    # GPT ответ
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
@@ -181,7 +211,6 @@ def send_telegram_message(chat_id, text, photo_path=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     requests.post(url, json=payload)
-
     if photo_path and os.path.exists(photo_path):
         url_photo = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
         with open(photo_path, 'rb') as photo:
@@ -189,7 +218,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot fully upgraded: FSM fixed, project detection enabled."
+    return "Avalon bot fully upgraded with smart FSM, lang & project detection."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

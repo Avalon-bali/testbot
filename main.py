@@ -37,12 +37,16 @@ def normalize_platform(text):
     return ""
 
 def is_confirmative_reply(text):
-    confirm = ["да", "давайте", "ок", "хорошо", "можно", "вечером", "утром", "после обеда", "давай", "погнали"]
-    if any(p in text for p in confirm):
+    confirm = ["да", "давайте", "ок", "хорошо", "можно", "вечером", "утром", "сегодня", "завтра", "в любой день", "в любое время", "давай", "погнали"]
+    if any(p in text.lower() for p in confirm):
         return True
     if normalize_platform(text) in platforms:
         return True
     return False
+
+def extract_datetime_candidate(text):
+    candidates = ["вечером", "утром", "сегодня", "завтра", "в любой день", "в любое время", "после обеда", "до обеда"]
+    return text if any(p in text.lower() for p in candidates) else None
 
 def load_documents():
     folder = "docs"
@@ -103,22 +107,29 @@ def telegram_webhook():
 
         if "name" not in lead:
             lead["name"] = text
-            send_telegram_message(chat_id, "📱 Укажите платформу для звонка: WhatsApp / Telegram / Zoom / Google Meet")
+            if not lead.get("platform"):
+                send_telegram_message(chat_id, "📱 Укажите платформу для звонка: WhatsApp / Telegram / Zoom / Google Meet")
+            elif not lead.get("datetime"):
+                send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
+            else:
+                send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
+                return "ok"
             return "ok"
 
-        elif "platform" not in lead:
+        elif not lead.get("platform"):
             norm = normalize_platform(lower_text)
             if norm not in platforms:
                 send_telegram_message(chat_id, "❗ Пожалуйста, выберите одну из предложенных платформ: WhatsApp / Telegram / Zoom / Google Meet.")
                 return "ok"
             lead["platform"] = norm
-            if norm == "whatsapp":
-                send_telegram_message(chat_id, "📞 Пожалуйста, напишите номер WhatsApp:")
-            else:
+            if not lead.get("datetime"):
                 send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
+            else:
+                send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами.")
+                return "ok"
             return "ok"
 
-        elif lead.get("platform") == "whatsapp" and "phone" not in lead:
+        elif lead.get("platform") == "whatsapp" and not lead.get("phone"):
             digits = re.sub(r"\D", "", text)
             if len(digits) < 6:
                 send_telegram_message(chat_id, "❗ Пожалуйста, укажите корректный номер телефона.")
@@ -127,7 +138,7 @@ def telegram_webhook():
             send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             return "ok"
 
-        elif "datetime" not in lead:
+        elif not lead.get("datetime"):
             if len(text) < 3 or "?" in text:
                 send_telegram_message(chat_id, "❗ Пожалуйста, укажите удобное время для звонка.")
                 return "ok"
@@ -153,7 +164,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка.")
         return "ok"
 
-    # FSM: по вопросу GPT и подтверждению (в т.ч. сразу с выбором платформы)
+    # FSM запуск по вопросу GPT
     invite_keywords = ["созвон", "звонок", "организовать звонок", "позвонить", "связаться"]
 
     last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
@@ -166,9 +177,12 @@ def telegram_webhook():
         is_confirmative_reply(lower_text)
     ):
         platform = normalize_platform(lower_text)
+        datetime_value = extract_datetime_candidate(lower_text)
         lead_data[user_id] = {}
         if platform in platforms:
             lead_data[user_id]["platform"] = platform
+        if datetime_value:
+            lead_data[user_id]["datetime"] = datetime_value
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей.\nКак к вам можно обращаться?")
         return "ok"
 
@@ -215,7 +229,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot — FSM с определением платформы по ответу на вопрос."
+    return "Avalon bot: FSM now remembers time reply and skips double asking."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

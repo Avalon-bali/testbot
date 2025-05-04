@@ -1,9 +1,9 @@
-import random
-from flask import Flask, request
-import openai
-import requests
 import os
 import re
+import random
+import openai
+import requests
+from flask import Flask, request
 import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
@@ -74,18 +74,16 @@ def telegram_webhook():
     chat_id = message.get("chat", {}).get("id")
     user_id = message.get("from", {}).get("id")
     text = message.get("text", "").strip()
-    username = message.get("from", {}).get("username", "")
     raw_lang = message.get("from", {}).get("language_code", "en")[:2]
     lang_code = "ru" if raw_lang == "ru" else "ua" if raw_lang == "uk" else "en"
-    lower_text = text.lower()
     system_prompt = load_system_prompt(lang_code)
 
-    print(f"📥 Получено сообщение от {user_id}: {text}")
+    print(f"📥 Сообщение от {user_id}: {text}")
 
     if not chat_id:
         return "no chat_id", 400
 
-    if lower_text == "/start":
+    if text.lower() == "/start":
         greetings = {
             "ru": "👋 Здравствуйте! Я — AI ассистент компании Avalon. С радостью помогу по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?",
             "ua": "👋 Вітаю! Я — AI-асистент компанії Avalon. Із задоволенням допоможу з проєктами, інвестиціями та життям на Балі. Чим можу бути корисним?",
@@ -123,9 +121,24 @@ def telegram_webhook():
     send_telegram_message(chat_id, reply)
     return "ok"
 
+@app.route("/test-photo", methods=["GET"])
+def test_photo():
+    chat_id = os.environ.get("TEST_CHAT_ID")
+    if not chat_id:
+        return "❌ TEST_CHAT_ID не задан", 400
+
+    photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
+
+    if not os.path.exists(photo_path):
+        print("❌ Файл не найден:", photo_path)
+        return f"❌ Файл не найден: {photo_path}", 404
+
+    send_telegram_message(chat_id, "🧪 Тест картинки Avalon", photo_path=photo_path)
+    return "✅ Картинка отправлена в Telegram", 200
+
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot (image + stable response)"
+    return "Avalon bot: image test ready."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

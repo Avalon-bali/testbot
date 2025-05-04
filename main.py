@@ -49,7 +49,7 @@ def load_system_prompt(lang):
 
 def send_telegram_message(chat_id, text, photo_path=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     requests.post(url, json=payload)
 
     if photo_path and os.path.exists(photo_path):
@@ -110,7 +110,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, "Avalon – современная недвижимость на Бали.", photo_path=photo_path)
         return "ok"
 
-    # GPT-ответ
+    # GPT-ответ с диалоговой структурой и стилем общения
     documents_context = load_documents()
     system_prompt = load_system_prompt(lang_code)
     history = sessions.get(user_id, [])
@@ -119,13 +119,23 @@ def telegram_webhook():
         *history[-6:],
         {"role": "user", "content": text}
     ]
-    try:
-        response = openai.chat.completions.create(model="gpt-4o", messages=messages)
-        reply = response.choices[0].message.content.strip()
-    except Exception:
-        reply = "Произошла ошибка при обращении к OpenAI."
 
-    sessions[user_id] = history[-8:] + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
+        reply = response.choices[0].message.content.strip()
+        reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
+    except Exception as e:
+        reply = f"Произошла ошибка при обращении к OpenAI:\n\n{e}"
+        print("❌ GPT error:", e)
+
+    sessions[user_id] = (history + [
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": reply}
+    ])[-10:]
+
     send_telegram_message(chat_id, reply)
     return "ok"
 

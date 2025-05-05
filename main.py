@@ -99,15 +99,46 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # Картинка Avalon (один раз)
-    if ("avalon" in lower_text or "авалон" in lower_text) and not session_flags.get(user_id, {}).get("avalon_photo_sent"):
-        photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
-        send_telegram_message(chat_id, "", photo_path=photo_path)
-        session_flags.setdefault(user_id, {})["avalon_photo_sent"] = True
+    # Показываем картинки один раз за сессию
+    def send_image_once(key, filename, caption):
+        if not session_flags.get(user_id, {}).get(f"{key}_photo_sent"):
+            send_telegram_message(chat_id, caption, photo_path=f"AVALON/avalon-photos/{filename}")
+            session_flags.setdefault(user_id, {})[f"{key}_photo_sent"] = True
 
-    # FSM шаги
+    if "avalon" in lower_text or "авалон" in lower_text:
+        send_image_once("avalon", "Avalon-reviews-and-ratings-1.jpg", "Avalon | Development & Investment. Подробнее ниже.")
+
+    if "om" in lower_text:
+        send_image_once("om", "om.jpg", "OM Club House. Подробнее ниже.")
+
+    if "buddha" in lower_text:
+        send_image_once("buddha", "buddha.jpg", "BUDDHA Club House. Сейчас расскажу.")
+
+    if "tao" in lower_text or "тао" in lower_text:
+        send_image_once("tao", "tao.jpg", "TAO. Ниже вся информация.")
+
+    # FSM: ответ на свой вопрос
     if user_id in lead_data:
         lead = lead_data[user_id]
+        if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "когда", "есть ли", "адрес", "что такое")):
+            # ответ через GPT + возврат к FSM
+            history = sessions.get(user_id, [])
+            messages = [
+                {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
+                *history[-6:],
+                {"role": "user", "content": text}
+            ]
+            try:
+                response = openai.chat.completions.create(model="gpt-4o", messages=messages)
+                reply = response.choices[0].message.content.strip()
+                reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
+            except Exception as e:
+                reply = f"Произошла ошибка при обращении к OpenAI:\n\n{e}"
+                print("❌ GPT Error:", e)
+            send_telegram_message(chat_id, reply)
+            send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка, а потом я с радостью помогу вам с остальными вопросами.")
+            return "ok"
+
         if "name" not in lead:
             lead["name"] = text
             send_telegram_message(chat_id, "📱 Укажите платформу для звонка: WhatsApp / Telegram / Zoom / Google Meet")
@@ -156,7 +187,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей. Как к вам можно обращаться?")
         return "ok"
 
-    # GPT обработка
+    # GPT обычный
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
@@ -165,10 +196,7 @@ def telegram_webhook():
     ]
 
     try:
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        )
+        response = openai.chat.completions.create(model="gpt-4o", messages=messages)
         reply = response.choices[0].message.content.strip()
         reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
     except Exception as e:
@@ -185,7 +213,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot ✅ FSM, image, Google Sheets"
+    return "Avalon bot ✅ full FSM, GPT, images OK"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

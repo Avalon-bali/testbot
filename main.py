@@ -1,6 +1,7 @@
 import random
 import os
 import re
+import time
 import requests
 import openai
 import gspread
@@ -29,6 +30,7 @@ def send_typing_action(chat_id):
 
 def send_telegram_message(chat_id, text, photo_path=None):
     send_typing_action(chat_id)
+    time.sleep(1)
 
     if photo_path:
         if os.path.exists(photo_path):
@@ -101,7 +103,24 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # FSM: во время заполнения — игнор вопросов
+    def send_image_once(key, filename, caption):
+        if not session_flags.get(user_id, {}).get(f"{key}_photo_sent"):
+            send_telegram_message(chat_id, caption, photo_path=f"AVALON/avalon-photos/{filename}")
+            session_flags.setdefault(user_id, {})[f"{key}_photo_sent"] = True
+
+    if "avalon" in lower_text or "авалон" in lower_text:
+        send_image_once("avalon", "Avalon-reviews-and-ratings-1.jpg", "Avalon | Development & Investment. Подробнее ниже 👇")
+
+    if "om" in lower_text:
+        send_image_once("om", "om.jpg", "OM Club House. Подробнее ниже 👇")
+
+    if "buddha" in lower_text:
+        send_image_once("buddha", "buddha.jpg", "BUDDHA Club House. Сейчас расскажу 👇")
+
+    if "tao" in lower_text or "тао" in lower_text:
+        send_image_once("tao", "tao.jpg", "TAO. Ниже вся информация 👇")
+
+    # FSM: не отвечаем на вопросы
     if user_id in lead_data:
         if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "есть ли", "когда", "адрес", "можно ли")):
             send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка. После этого с радостью вернусь к вашему вопросу.")
@@ -135,7 +154,7 @@ def telegram_webhook():
                     lead.get("platform"),
                     wa_url,
                     lead.get("datetime"),
-                    "",  # проект
+                    "",
                     lang_code
                 ])
             except Exception as e:
@@ -144,7 +163,6 @@ def telegram_webhook():
             lead_data.pop(user_id, None)
             return "ok"
 
-    # FSM запуск
     last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
     if (
         user_id not in lead_data and
@@ -155,25 +173,6 @@ def telegram_webhook():
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей. Как к вам можно обращаться?")
         return "ok"
 
-    # Картинки проектов — 1 раз
-    def send_image_once(key, filename, caption):
-        if not session_flags.get(user_id, {}).get(f"{key}_photo_sent"):
-            send_telegram_message(chat_id, caption, photo_path=f"AVALON/avalon-photos/{filename}")
-            session_flags.setdefault(user_id, {})[f"{key}_photo_sent"] = True
-
-    if "avalon" in lower_text or "авалон" in lower_text:
-        send_image_once("avalon", "Avalon-reviews-and-ratings-1.jpg", "Avalon | Development & Investment. Подробнее ниже 👇")
-
-    if "om" in lower_text:
-        send_image_once("om", "om.jpg", "OM Club House. Подробнее ниже 👇")
-
-    if "buddha" in lower_text:
-        send_image_once("buddha", "buddha.jpg", "BUDDHA Club House. Сейчас расскажу 👇")
-
-    if "tao" in lower_text or "тао" in lower_text:
-        send_image_once("tao", "tao.jpg", "TAO. Ниже вся информация 👇")
-
-    # GPT
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{load_system_prompt(lang_code)}\n\n{documents_context}"},
@@ -182,10 +181,7 @@ def telegram_webhook():
     ]
 
     try:
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        )
+        response = openai.chat.completions.create(model="gpt-4o", messages=messages)
         reply = response.choices[0].message.content.strip()
         reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
     except Exception as e:
@@ -202,7 +198,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot ✅ full FSM, one-time images, clean UX"
+    return "Avalon bot ✅ FSM + photo + typing + GPT OK"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -2,6 +2,7 @@ import random
 import os
 import re
 import time
+import csv
 import requests
 import openai
 import gspread
@@ -29,6 +30,9 @@ def send_typing_action(chat_id):
     requests.post(url, json={"chat_id": chat_id, "action": "typing"})
 
 def send_telegram_message(chat_id, text, photo_path=None):
+    send_typing_action(chat_id)
+    time.sleep(1)
+
     if photo_path:
         if os.path.exists(photo_path):
             url_photo = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -48,6 +52,39 @@ def send_telegram_message(chat_id, text, photo_path=None):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
         requests.post(url, json=payload)
+
+def log_dialog(user_id):
+    now = datetime.now()
+    with open("dialogs.csv", "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([user_id, now.strftime("%Y-%m-%d %H:%M:%S")])
+
+def log_lead(user_id):
+    now = datetime.now()
+    with open("leads.csv", "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([user_id, now.strftime("%Y-%m-%d %H:%M:%S")])
+
+def count_by_period(file_path):
+    today = datetime.now().date()
+    this_month = today.replace(day=1)
+    total, today_count, month_count = 0, 0, 0
+    if not os.path.exists(file_path):
+        return (0, 0, 0)
+    with open(file_path, "r") as f:
+        for row in csv.reader(f):
+            if len(row) < 2:
+                continue
+            try:
+                ts = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            total += 1
+            if ts.date() == today:
+                today_count += 1
+            if ts.date() >= this_month:
+                month_count += 1
+    return today_count, month_count, total
 
 def load_documents():
     folder = "docs"
@@ -87,7 +124,8 @@ def telegram_webhook():
     if not chat_id:
         return "no chat_id", 400
 
-    if text.lower() == "/start":
+    if lower_text == "/start":
+        log_dialog(user_id)
         greetings = {
             "ru": "👋 Здравствуйте! Я — AI ассистент компании Avalon. С радостью помогу по вопросам наших проектов, инвестиций и жизни на Бали. Чем могу быть полезен?",
             "ua": "👋 Вітаю! Я — AI-асистент компанії Avalon. Із задоволенням допоможу з проєктами, інвестиціями та життям на Балі. Чим можу бути корисним?",
@@ -100,27 +138,42 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # Одноразовые изображения
+    if lower_text == "/admin stats":
+        d_today, d_month, d_total = count_by_period("dialogs.csv")
+        l_today, l_month, l_total = count_by_period("leads.csv")
+        stats = (
+            f"📊 Статистика:\n\n"
+            f"*Диалогов:*\n"
+            f"- сегодня: {d_today}\n"
+            f"- за месяц: {d_month}\n"
+            f"- всего: {d_total}\n\n"
+            f"*Лидов:*\n"
+            f"- сегодня: {l_today}\n"
+            f"- за месяц: {l_month}\n"
+            f"- всего: {l_total}"
+        )
+        send_telegram_message(chat_id, stats)
+        return "ok"
+
     def send_image_once(key, filename, caption):
         if not session_flags.get(user_id, {}).get(f"{key}_photo_sent"):
             send_telegram_message(chat_id, caption, photo_path=f"AVALON/avalon-photos/{filename}")
             session_flags.setdefault(user_id, {})[f"{key}_photo_sent"] = True
 
-    if any(word in lower_text for word in ["avalon", "авалон"]):
+    if any(w in lower_text for w in ["avalon", "авалон"]):
         send_image_once("avalon", "Avalon-reviews-and-ratings-1.jpg", "Avalon | Development & Investment. Подробнее ниже 👇")
-    if any(word in lower_text for word in ["om", "ом"]):
+    if any(w in lower_text for w in ["om", "ом"]):
         send_image_once("om", "om.jpg", "OM Club House. Подробнее ниже 👇")
-    if any(word in lower_text for word in ["buddha", "будда", "буда"]):
+    if any(w in lower_text for w in ["buddha", "будда", "буда"]):
         send_image_once("buddha", "buddha.jpg", "BUDDHA Club House. Сейчас расскажу 👇")
-    if any(word in lower_text for word in ["tao", "тао"]):
+    if any(w in lower_text for w in ["tao", "тао"]):
         send_image_once("tao", "tao.jpg", "TAO Club House. Ниже вся информация 👇")
 
-    # FSM активен — не отвечать на вопросы
+    # FSM
     if user_id in lead_data:
-        if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "есть ли", "когда", "можно ли", "адрес")):
+        if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "есть ли", "адрес", "можно ли", "зачем", "когда")):
             send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка. После этого с радостью вернусь к вашему вопросу.")
             return "ok"
-
         lead = lead_data[user_id]
         if "name" not in lead:
             lead["name"] = text
@@ -152,24 +205,31 @@ def telegram_webhook():
                     "",
                     lang_code
                 ])
+                log_lead(user_id)
             except Exception as e:
-                print("⚠️ Ошибка при добавлении в таблицу:", e)
+                print("⚠️ Ошибка при записи в таблицу:", e)
             send_telegram_message(chat_id, "✅ Спасибо за информацию! Наш менеджер свяжется с вами по WhatsApp вечером. Если у вас появятся дополнительные вопросы, не стесняйтесь обращаться. Прекрасного вам дня!")
             lead_data.pop(user_id, None)
             return "ok"
 
-    # FSM запуск (после предложения звонка)
+    # FSM запуск
+    trigger_words = ["звонок", "созвон", "консультац", "менеджер", "встрече", "перезвонить"]
+    confirm_phrases = [
+        "да", "давай", "давайте", "ок", "оке", "окей", "можно",
+        "вечером", "утром", "конечно", "записывай", "вперед",
+        "согласен", "поехали", "погнали", "хорошо", "приступим"
+    ]
     last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
     if (
         user_id not in lead_data and
-        "звонок" in last_gpt_msg.lower() and
-        lower_text in ["да", "давайте", "ок", "можно", "вечером", "утром"]
+        any(w in last_gpt_msg.lower() for w in trigger_words) and
+        any(p in lower_text for p in confirm_phrases)
     ):
         lead_data[user_id] = {}
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей. Как к вам можно обращаться?")
         return "ok"
 
-    # GPT-ответ
+    # GPT
     send_typing_action(chat_id)
     time.sleep(1.2)
 
@@ -186,7 +246,6 @@ def telegram_webhook():
         reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
     except Exception as e:
         reply = f"Произошла ошибка при обращении к OpenAI:\n\n{e}"
-        print("❌ GPT Error:", e)
 
     sessions[user_id] = (history + [
         {"role": "user", "content": text},
@@ -198,7 +257,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot ✅ typing + images + FSM"
+    return "Avalon bot ✅ FSM, GPT, картинки, статистика"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

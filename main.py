@@ -23,26 +23,28 @@ sessions = {}
 lead_data = {}
 session_flags = {}
 
+def send_typing_action(chat_id):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendChatAction"
+    requests.post(url, json={"chat_id": chat_id, "action": "typing"})
+
 def send_telegram_message(chat_id, text, photo_path=None):
+    send_typing_action(chat_id)
+
     if photo_path:
         if os.path.exists(photo_path):
-            print("📸 Отправляю изображение:", photo_path)
             url_photo = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
             with open(photo_path, 'rb') as photo:
                 files = {'photo': photo}
                 data = {
                     'chat_id': chat_id,
-                    'caption': text,
+                    'caption': text if text else None,
                     'parse_mode': 'Markdown'
                 }
                 if not text:
                     del data["caption"]
                 requests.post(url_photo, files=files, data=data)
         else:
-            print("❌ Файл не найден:", photo_path)
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            payload = {"chat_id": chat_id, "text": text + "\n\n⚠️ Картинка не найдена.", "parse_mode": "Markdown"}
-            requests.post(url, json=payload)
+            send_telegram_message(chat_id, text + "\n\n⚠️ Картинка не найдена.")
     else:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
@@ -99,46 +101,13 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # Показываем картинки один раз за сессию
-    def send_image_once(key, filename, caption):
-        if not session_flags.get(user_id, {}).get(f"{key}_photo_sent"):
-            send_telegram_message(chat_id, caption, photo_path=f"AVALON/avalon-photos/{filename}")
-            session_flags.setdefault(user_id, {})[f"{key}_photo_sent"] = True
-
-    if "avalon" in lower_text or "авалон" in lower_text:
-        send_image_once("avalon", "Avalon-reviews-and-ratings-1.jpg", "Avalon | Development & Investment. Подробнее ниже.")
-
-    if "om" in lower_text:
-        send_image_once("om", "om.jpg", "OM Club House. Подробнее ниже.")
-
-    if "buddha" in lower_text:
-        send_image_once("buddha", "buddha.jpg", "BUDDHA Club House. Сейчас расскажу.")
-
-    if "tao" in lower_text or "тао" in lower_text:
-        send_image_once("tao", "tao.jpg", "TAO. Ниже вся информация.")
-
-    # FSM: ответ на свой вопрос
+    # FSM: во время заполнения — игнор вопросов
     if user_id in lead_data:
-        lead = lead_data[user_id]
-        if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "когда", "есть ли", "адрес", "что такое")):
-            # ответ через GPT + возврат к FSM
-            history = sessions.get(user_id, [])
-            messages = [
-                {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
-                *history[-6:],
-                {"role": "user", "content": text}
-            ]
-            try:
-                response = openai.chat.completions.create(model="gpt-4o", messages=messages)
-                reply = response.choices[0].message.content.strip()
-                reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
-            except Exception as e:
-                reply = f"Произошла ошибка при обращении к OpenAI:\n\n{e}"
-                print("❌ GPT Error:", e)
-            send_telegram_message(chat_id, reply)
-            send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка, а потом я с радостью помогу вам с остальными вопросами.")
+        if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "есть ли", "когда", "адрес", "можно ли")):
+            send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка. После этого с радостью вернусь к вашему вопросу.")
             return "ok"
 
+        lead = lead_data[user_id]
         if "name" not in lead:
             lead["name"] = text
             send_telegram_message(chat_id, "📱 Укажите платформу для звонка: WhatsApp / Telegram / Zoom / Google Meet")
@@ -169,7 +138,6 @@ def telegram_webhook():
                     "",  # проект
                     lang_code
                 ])
-                print("✅ Лид добавлен:", lead.get("name"))
             except Exception as e:
                 print("⚠️ Ошибка при добавлении в таблицу:", e)
             send_telegram_message(chat_id, "✅ Спасибо за информацию! Наш менеджер свяжется с вами по WhatsApp вечером. Если у вас появятся дополнительные вопросы, не стесняйтесь обращаться. Прекрасного вам дня!")
@@ -187,16 +155,37 @@ def telegram_webhook():
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей. Как к вам можно обращаться?")
         return "ok"
 
-    # GPT обычный
+    # Картинки проектов — 1 раз
+    def send_image_once(key, filename, caption):
+        if not session_flags.get(user_id, {}).get(f"{key}_photo_sent"):
+            send_telegram_message(chat_id, caption, photo_path=f"AVALON/avalon-photos/{filename}")
+            session_flags.setdefault(user_id, {})[f"{key}_photo_sent"] = True
+
+    if "avalon" in lower_text or "авалон" in lower_text:
+        send_image_once("avalon", "Avalon-reviews-and-ratings-1.jpg", "Avalon | Development & Investment. Подробнее ниже 👇")
+
+    if "om" in lower_text:
+        send_image_once("om", "om.jpg", "OM Club House. Подробнее ниже 👇")
+
+    if "buddha" in lower_text:
+        send_image_once("buddha", "buddha.jpg", "BUDDHA Club House. Сейчас расскажу 👇")
+
+    if "tao" in lower_text or "тао" in lower_text:
+        send_image_once("tao", "tao.jpg", "TAO. Ниже вся информация 👇")
+
+    # GPT
     history = sessions.get(user_id, [])
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
+        {"role": "system", "content": f"{load_system_prompt(lang_code)}\n\n{documents_context}"},
         *history[-6:],
         {"role": "user", "content": text}
     ]
 
     try:
-        response = openai.chat.completions.create(model="gpt-4o", messages=messages)
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
         reply = response.choices[0].message.content.strip()
         reply = re.sub(r"\*\*(.*?)\*\*", r"\1", reply)
     except Exception as e:
@@ -213,7 +202,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot ✅ full FSM, GPT, images OK"
+    return "Avalon bot ✅ full FSM, one-time images, clean UX"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

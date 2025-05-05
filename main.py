@@ -8,7 +8,6 @@ from flask import Flask, request
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 
-# ✅ app создаётся ДО маршрутов
 app = Flask(__name__)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -36,8 +35,9 @@ def send_telegram_message(chat_id, text, photo_path=None):
                     'caption': text,
                     'parse_mode': 'Markdown'
                 }
-                response = requests.post(url_photo, files=files, data=data)
-                print("📤 Ответ Telegram (фото):", response.status_code)
+                if not text:
+                    del data["caption"]
+                requests.post(url_photo, files=files, data=data)
         else:
             print("❌ Файл не найден:", photo_path)
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -46,8 +46,7 @@ def send_telegram_message(chat_id, text, photo_path=None):
     else:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-        response = requests.post(url, json=payload)
-        print("📤 Ответ Telegram (текст):", response.status_code)
+        requests.post(url, json=payload)
 
 def load_documents():
     folder = "docs"
@@ -100,10 +99,10 @@ def telegram_webhook():
         send_telegram_message(chat_id, greeting)
         return "ok"
 
-    # Avalon фото — один раз
+    # Картинка Avalon (один раз)
     if ("avalon" in lower_text or "авалон" in lower_text) and not session_flags.get(user_id, {}).get("avalon_photo_sent"):
         photo_path = "AVALON/avalon-photos/Avalon-reviews-and-ratings-1.jpg"
-        send_telegram_message(chat_id, "Avalon | Development & Investment", photo_path=photo_path)
+        send_telegram_message(chat_id, "", photo_path=photo_path)
         session_flags.setdefault(user_id, {})["avalon_photo_sent"] = True
 
     # FSM шаги
@@ -115,12 +114,19 @@ def telegram_webhook():
             return "ok"
         elif "platform" not in lead:
             lead["platform"] = text
+            if lead["platform"].lower() == "whatsapp":
+                send_telegram_message(chat_id, "📞 Пожалуйста, напишите ваш номер WhatsApp")
+            else:
+                send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
+            return "ok"
+        elif lead.get("platform", "").lower() == "whatsapp" and "phone" not in lead:
+            lead["phone"] = text
             send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             return "ok"
         elif "datetime" not in lead:
             lead["datetime"] = text
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            wa_url = f"https://wa.me/{lead.get('phone')}" if "whatsapp" in lead.get("platform", "").lower() else ""
+            wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform", "").lower() == "whatsapp" else ""
             try:
                 sheet.append_row([
                     now,
@@ -135,7 +141,7 @@ def telegram_webhook():
                 print("✅ Лид добавлен:", lead.get("name"))
             except Exception as e:
                 print("⚠️ Ошибка при добавлении в таблицу:", e)
-            send_telegram_message(chat_id, "✅ Все данные записаны. Менеджер скоро свяжется с вами. Если есть вопросы — я на связи.")
+            send_telegram_message(chat_id, "✅ Спасибо за информацию! Наш менеджер свяжется с вами по WhatsApp вечером. Если у вас появятся дополнительные вопросы, не стесняйтесь обращаться. Прекрасного вам дня!")
             lead_data.pop(user_id, None)
             return "ok"
 
@@ -150,7 +156,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей. Как к вам можно обращаться?")
         return "ok"
 
-    # GPT
+    # GPT обработка
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{documents_context}"},
@@ -179,7 +185,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot ✅ live"
+    return "Avalon bot ✅ FSM, image, Google Sheets"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

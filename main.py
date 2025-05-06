@@ -44,6 +44,7 @@ def send_typing_action(chat_id):
 def send_telegram_message(chat_id, text, photo_path=None):
     send_typing_action(chat_id)
     time.sleep(1)
+
     if photo_path:
         if os.path.exists(photo_path):
             url_photo = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"

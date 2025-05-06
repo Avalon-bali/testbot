@@ -25,6 +25,18 @@ sessions = {}
 lead_data = {}
 session_flags = {}
 
+def normalize_platform(text):
+    t = text.lower().strip()
+    if t in ["whatsapp", "вотсап", "ватсап"]:
+        return "whatsapp"
+    if t in ["telegram", "телеграм", "тг"]:
+        return "telegram"
+    if t in ["zoom", "зум"]:
+        return "zoom"
+    if t in ["google meet", "гугл мит", "мит", "митап", "googlemeet"]:
+        return "google meet"
+    return t
+
 def send_typing_action(chat_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendChatAction"
     requests.post(url, json={"chat_id": chat_id, "action": "typing"})
@@ -180,20 +192,20 @@ def telegram_webhook():
             send_telegram_message(chat_id, "📱 Укажите платформу для звонка: WhatsApp / Telegram / Zoom / Google Meet")
             return "ok"
         elif "platform" not in lead:
-            lead["platform"] = text
-            if lead["platform"].lower() == "whatsapp":
+            lead["platform"] = normalize_platform(text)
+            if lead["platform"] == "whatsapp":
                 send_telegram_message(chat_id, "📞 Пожалуйста, напишите ваш номер WhatsApp")
             else:
                 send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             return "ok"
-        elif lead.get("platform", "").lower() == "whatsapp" and "phone" not in lead:
+        elif lead.get("platform") == "whatsapp" and "phone" not in lead:
             lead["phone"] = text
             send_telegram_message(chat_id, "🗓 Когда вам удобно созвониться?")
             return "ok"
         elif "datetime" not in lead:
             lead["datetime"] = text
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform", "").lower() == "whatsapp" else ""
+            wa_url = f"https://wa.me/{lead.get('phone')}" if lead.get("platform") == "whatsapp" else ""
             try:
                 sheet.append_row([
                     now,
@@ -257,7 +269,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot ✅ FSM, GPT, картинки, статистика"
+    return "Avalon bot ✅ FSM, нормализация, статистика, GPT, изображения"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

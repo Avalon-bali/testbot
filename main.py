@@ -164,6 +164,7 @@ def telegram_webhook():
         send_telegram_message(chat_id, stats)
         return "ok"
 
+    # Картинки
     if any(w in lower_text for w in ["avalon", "авалон"]):
         send_image_once(user_id, chat_id, "avalon", "Avalon-reviews-and-ratings-1.jpg", "Avalon | Development & Investment. Подробнее ниже 👇")
     if any(w in lower_text for w in ["om", "ом"]):
@@ -173,6 +174,7 @@ def telegram_webhook():
     if any(w in lower_text for w in ["tao", "тао"]):
         send_image_once(user_id, chat_id, "tao", "tao.jpg", "TAO Club House. Ниже вся информация 👇")
 
+    # FSM
     if user_id in lead_data:
         if "?" in text or lower_text.startswith(("где", "что", "как", "почему", "почем", "есть ли", "адрес", "можно ли", "зачем", "когда")):
             send_telegram_message(chat_id, "📌 Давайте сначала завершим детали звонка. После этого с радостью вернусь к вашему вопросу.")
@@ -215,22 +217,25 @@ def telegram_webhook():
             lead_data.pop(user_id, None)
             return "ok"
 
-    last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
+    trigger_words = ["звонок", "созвон", "консультац", "менеджер", "встрече", "перезвонить"]
     confirm_phrases = [
         "да", "давай", "давайте", "ок", "оке", "окей", "можно",
         "вечером", "утром", "конечно", "записывай", "вперед",
-        "согласен", "поехали", "погнали", "хорошо", "приступим", "ещё раз", "заново", "снова", "запишемся"
+        "согласен", "поехали", "погнали", "хорошо", "приступим"
     ]
-    gpt_invite = any(x in last_gpt_msg.lower() for x in ["запишу", "организую звонок", "свяжется менеджер", "назначить консультац"])
-
-    if user_id not in lead_data and gpt_invite and any(p in lower_text for p in confirm_phrases):
+    last_gpt_msg = next((m["content"] for m in reversed(sessions.get(user_id, [])) if m["role"] == "assistant"), "")
+    if (
+        user_id not in lead_data and
+        any(w in last_gpt_msg.lower() for w in trigger_words) and
+        any(p in lower_text for p in confirm_phrases)
+    ):
         lead_data[user_id] = {}
         send_telegram_message(chat_id, "✅ Отлично! Давайте уточним пару деталей. Как к вам можно обращаться?")
         return "ok"
 
+    # GPT
     send_typing_action(chat_id)
     time.sleep(1.2)
-
     history = sessions.get(user_id, [])
     messages = [
         {"role": "system", "content": f"{load_system_prompt(lang_code)}\n\n{documents_context}"},
@@ -255,7 +260,7 @@ def telegram_webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Avalon bot ✅ FSM + GPT + картинки + статистика"
+    return "Avalon bot ✅ full features"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
